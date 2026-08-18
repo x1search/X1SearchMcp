@@ -83,3 +83,14 @@ carries one inside the exe.
 
 See [docs/UserManual.md](docs/UserManual.md) for parameters, configuration, the `/x1` skill,
 query syntax, and troubleshooting.
+
+## Privacy Policy
+
+This connector runs entirely on your machine: it reads from your local X1 Search index over a
+local WCF connection to `X1ServiceHost` and returns results directly to whichever Claude client
+called it. It does not send your indexed content — files, email, chat, or any other data — to
+X1 Discovery, Inc. or to Anthropic.
+
+The full X1 Discovery, Inc. privacy policy, covering data collected by X1 Search itself (the
+desktop application and index this connector reads from), is available at
+[x1.com/privacy-and-terms](https://www.x1.com/privacy-and-terms/).

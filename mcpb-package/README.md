@@ -45,9 +45,13 @@ Run `build-installer.bat` from the repo root — it builds the solution, stages 
 which stages this package's `server\` folder and runs `mcpb pack` to produce
 `installer\x1-search.mcpb`.
 
-## Known gaps (tracked under epic XS-1664, not blockers for XS-1665)
+## Known gaps
 
-- `manifest.json`'s `license` is `"UNLICENSED"` — no repo-wide license text exists yet; a
-  Legal-owned deliverable under a separate XS-1664 subtask.
 - `manifest.json`'s `compatibility.claude_desktop` version floor (`>=0.10.0`) is an unverified
   guess — confirm against Anthropic's current MCPB docs before submitting.
+
+## Privacy Policy
+
+See [Privacy Policy](https://www.x1.com/privacy-and-terms/). This extension does not send your
+indexed content (files, email, chat) to X1 or to Anthropic — it reads from your local X1 Search
+index and returns results directly to Claude.

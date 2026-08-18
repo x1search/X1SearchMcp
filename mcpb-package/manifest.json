@@ -7,9 +7,16 @@
     "name": "X1 Discovery, Inc.",
     "url": "https://www.x1.com"
   },
+  "display_name": "X1 Search",
   "homepage": "https://www.x1.com",
+  "documentation": "https://github.com/x1search/X1SearchMcp/blob/main/docs/UserManual.md",
+  "support": "https://github.com/x1search/X1SearchMcp/issues",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/x1search/X1SearchMcp.git"
+  },
   "keywords": ["x1", "search", "files", "email", "attachments", "preview", "mcp"],
-  "license": "UNLICENSED",
+  "license": "MIT",
   "server": {
     "type": "binary",
     "entry_point": "server/X1McpBridge.exe",
