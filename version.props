@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Single source of truth for the version stamped into X1McpBridge.exe and X1McpGraphQL.exe.
+
+  This number identifies a CONNECTOR RELEASE, and every binary in that release carries it -
+  whichever flavor was built. The Lean flavor (the customer default) ships only X1McpBridge.exe and
+  no net10 daemon at all, so "both exes always ship together" no longer holds; what still holds, and
+  what matters, is that two binaries from the same release never report different versions, and two
+  binaries reporting the same version are always from the same release. ProxyMode's relay-identity
+  check and x1_version both depend on exactly that (see RelayHealth.Decide).
+
+  Bump it with bump.bat rather than editing by hand - the exes must never disagree, and a
+  hand-edit that touches only one of them reintroduces exactly the "which binary am I talking
+  to" problem this version exists to answer.
+
+  Do NOT add the build flavor here. This file is the version's single source of truth and bump.ps1
+  regex-edits it; the flavor lives in build-installer.bat (X1MCP_FLAVOR), the daemon csproj's
+  X1McpFlavor property, and build-info.json, and never enters this file.
+
+  This is the connector's OWN build identity. It is deliberately NOT kept in sync with X1
+  Search's version (x1buildversion-search.ini): the connector ships changes without an X1
+  Search release, and reusing X1's number would give two different binaries the same version -
+  destroying the identity the number exists to provide.
+-->
+<Project>
+  <PropertyGroup>
+    <X1McpVersion>1.0.0.34</X1McpVersion>
+  </PropertyGroup>
+</Project>

@@ -1,0 +1,828 @@
+<title>X1 Cost Savings</title>
+<style>
+  :root {
+    --bg: #f6f4ee;
+    --bg-elev: #ffffff;
+    --bg-sunken: #ece8de;
+    --text: #1c1f1a;
+    --text-dim: #6b6a5e;
+    --line: #ddd8c9;
+    --accent: #a9761f;
+    --accent-soft: #f0e2c4;
+    --good: #3f7a5c;
+    --good-soft: #dcece2;
+    --gain: #3d6d99;
+    --gain-soft: #dde7f0;
+    --neutral-chip: #e7e3d5;
+    --shadow: 0 1px 2px rgba(30, 25, 10, 0.06), 0 8px 24px rgba(30, 25, 10, 0.05);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14120d;
+      --bg-elev: #1d1a13;
+      --bg-sunken: #100e0a;
+      --text: #ede8da;
+      --text-dim: #948d78;
+      --line: #34301f;
+      --accent: #dcaa4c;
+      --accent-soft: #3a2e14;
+      --good: #7cc39e;
+      --good-soft: #1c2e24;
+      --gain: #7fb0dd;
+      --gain-soft: #182430;
+      --neutral-chip: #262217;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 32px rgba(0, 0, 0, 0.35);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #14120d;
+    --bg-elev: #1d1a13;
+    --bg-sunken: #100e0a;
+    --text: #ede8da;
+    --text-dim: #948d78;
+    --line: #34301f;
+    --accent: #dcaa4c;
+    --accent-soft: #3a2e14;
+    --good: #7cc39e;
+    --good-soft: #1c2e24;
+    --gain: #7fb0dd;
+    --gain-soft: #182430;
+    --neutral-chip: #262217;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 32px rgba(0, 0, 0, 0.35);
+  }
+
+  :root[data-theme="light"] {
+    --bg: #f6f4ee;
+    --bg-elev: #ffffff;
+    --bg-sunken: #ece8de;
+    --text: #1c1f1a;
+    --text-dim: #6b6a5e;
+    --line: #ddd8c9;
+    --accent: #a9761f;
+    --accent-soft: #f0e2c4;
+    --good: #3f7a5c;
+    --good-soft: #dcece2;
+    --gain: #3d6d99;
+    --gain-soft: #dde7f0;
+    --neutral-chip: #e7e3d5;
+    --shadow: 0 1px 2px rgba(30, 25, 10, 0.06), 0 8px 24px rgba(30, 25, 10, 0.05);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    padding: 32px 20px 60px;
+  }
+
+  .page {
+    max-width: 880px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+  }
+
+  .header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .eyebrow-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .eyebrow {
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    font-weight: 600;
+  }
+
+  .coef-chip {
+    font-family: ui-monospace, "SF Mono", Consolas, monospace;
+    font-size: 10.5px;
+    color: var(--text-dim);
+    background: var(--neutral-chip);
+    border-radius: 4px;
+    padding: 2px 7px;
+    letter-spacing: 0.01em;
+  }
+
+  h1 {
+    font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+    font-size: 27px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    margin: 2px 0 0;
+    text-wrap: balance;
+  }
+
+  .subtitle {
+    color: var(--text-dim);
+    font-size: 13px;
+    margin-top: 4px;
+  }
+
+  .num {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+  }
+
+  /* ---- hero stat row ---- */
+  .hero {
+    background: var(--bg-elev);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+    padding: 24px 26px;
+    display: grid;
+    grid-template-columns: 1.3fr 1fr;
+    gap: 24px;
+  }
+
+  @media (max-width: 620px) {
+    .hero { grid-template-columns: 1fr; }
+  }
+
+  .hero-left {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 6px;
+    border-right: 1px solid var(--line);
+    padding-right: 24px;
+  }
+
+  @media (max-width: 620px) {
+    .hero-left { border-right: none; border-bottom: 1px solid var(--line); padding-right: 0; padding-bottom: 18px; }
+  }
+
+  .hero-figure {
+    font-family: Georgia, serif;
+    font-size: 46px;
+    font-weight: 500;
+    line-height: 1;
+    color: var(--accent);
+  }
+
+  .hero-figure small {
+    font-size: 20px;
+    font-weight: 400;
+    color: var(--text-dim);
+    margin-left: 4px;
+  }
+
+  .hero-label {
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+
+  .hero-cost {
+    margin-top: 10px;
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    font-size: 13px;
+  }
+
+  .hero-cost strong {
+    font-family: ui-monospace, "SF Mono", Consolas, monospace;
+    color: var(--good);
+    font-size: 15px;
+  }
+
+  .stat-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px 20px;
+  }
+
+  .stat {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .stat-value {
+    font-family: ui-monospace, "SF Mono", Consolas, monospace;
+    font-size: 19px;
+    font-weight: 600;
+  }
+
+  .stat-key {
+    font-size: 11.5px;
+    color: var(--text-dim);
+    letter-spacing: 0.02em;
+  }
+
+  /* ---- range gauge ---- */
+  .gauge-wrap {
+    background: var(--bg-elev);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+    padding: 20px 26px 22px;
+  }
+
+  .gauge-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 14px;
+  }
+
+  .gauge-head .pct {
+    font-family: ui-monospace, "SF Mono", Consolas, monospace;
+    font-size: 15px;
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  .gauge-track {
+    position: relative;
+    height: 10px;
+    border-radius: 6px;
+    background: var(--bg-sunken);
+  }
+
+  .range-band {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    border-radius: 6px;
+    background: var(--accent-soft);
+  }
+
+  .range-marker {
+    position: absolute;
+    top: -4px;
+    width: 3px;
+    height: 18px;
+    border-radius: 2px;
+    background: var(--accent);
+    transform: translateX(-1.5px);
+  }
+
+  .gauge-scale {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 8px;
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  .gauge-scale .mid {
+    font-family: ui-monospace, "SF Mono", Consolas, monospace;
+    font-weight: 600;
+    color: var(--accent);
+  }
+
+  .gauge-note {
+    margin-top: 12px;
+    font-size: 12px;
+    color: var(--text-dim);
+    border-top: 1px solid var(--line);
+    padding-top: 12px;
+  }
+
+  /* ---- capability gain card ---- */
+  .gain-card {
+    background: var(--bg-elev);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+    padding: 18px 26px;
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    flex-wrap: wrap;
+  }
+
+  .gain-badge {
+    font-family: Georgia, serif;
+    font-size: 28px;
+    font-weight: 500;
+    color: var(--gain);
+    background: var(--gain-soft);
+    border-radius: 8px;
+    padding: 6px 16px;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+
+  .gain-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .gain-title {
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .gain-desc {
+    font-size: 12px;
+    color: var(--text-dim);
+    line-height: 1.5;
+  }
+
+  .gain-chips {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: 2px;
+  }
+
+  .gain-chip {
+    font-size: 11px;
+    color: var(--gain);
+    background: var(--gain-soft);
+    border-radius: 5px;
+    padding: 2px 8px;
+    white-space: nowrap;
+  }
+
+  /* ---- table ---- */
+  .table-card {
+    background: var(--bg-elev);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+
+  .table-card h2 {
+    font-family: Georgia, serif;
+    font-weight: 500;
+    font-size: 16px;
+    margin: 0;
+    padding: 16px 20px 12px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .table-scroll {
+    overflow-x: auto;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+
+  thead th {
+    text-align: left;
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    font-weight: 600;
+    padding: 10px 20px;
+    border-bottom: 1px solid var(--line);
+    white-space: nowrap;
+  }
+
+  thead th.num-col, tbody td.num-col { text-align: right; }
+
+  tbody td {
+    padding: 11px 20px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: middle;
+  }
+
+  tbody td.num-col { white-space: nowrap; }
+
+  tbody tr:last-child td { border-bottom: none; }
+
+  tbody tr:hover { background: var(--bg-sunken); }
+
+  .cat-name {
+    font-weight: 500;
+    white-space: nowrap;
+  }
+
+  .cat-sub {
+    display: block;
+    font-weight: 400;
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-top: 2px;
+    white-space: normal;
+    max-width: 320px;
+  }
+
+  .mode-chip {
+    display: inline-block;
+    margin-left: 7px;
+    font-size: 10.5px;
+    color: var(--text-dim);
+    background: var(--neutral-chip);
+    border-radius: 4px;
+    padding: 1px 6px;
+    letter-spacing: 0.01em;
+  }
+
+  .num-col { font-family: ui-monospace, "SF Mono", Consolas, monospace; }
+
+  .saved-cell { color: var(--good); font-weight: 600; }
+
+  .reduction-chip {
+    font-family: ui-monospace, "SF Mono", Consolas, monospace;
+    font-size: 12px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-radius: 5px;
+    padding: 2px 7px;
+  }
+
+  .reduction-none { color: var(--text-dim); }
+
+  .share-bar-wrap {
+    width: 64px;
+    height: 6px;
+    border-radius: 4px;
+    background: var(--bg-sunken);
+    display: inline-block;
+    vertical-align: middle;
+    overflow: hidden;
+    margin-right: 8px;
+  }
+
+  .share-bar-fill {
+    height: 100%;
+    background: var(--good);
+    border-radius: 4px;
+  }
+
+  .share-cell { display: flex; align-items: center; justify-content: flex-end; }
+
+  /* ---- reset row ---- */
+  .reset-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    background: var(--bg-elev);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+    padding: 14px 20px;
+  }
+
+  .reset-copy {
+    font-size: 12.5px;
+    color: var(--text-dim);
+  }
+
+  .reset-btn {
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text);
+    background: var(--bg-sunken);
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    padding: 8px 14px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s ease, transform 0.1s ease;
+  }
+
+  .reset-btn:hover { background: var(--neutral-chip); }
+  .reset-btn:active { transform: translateY(1px); }
+  .reset-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .toast {
+    display: none;
+    font-size: 12.5px;
+    color: var(--good);
+    font-weight: 500;
+  }
+
+  .footnote {
+    font-size: 11.5px;
+    color: var(--text-dim);
+    line-height: 1.6;
+    padding: 2px 4px 0;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .range-marker { transition: none; }
+  }
+</style>
+
+<style>
+  /* --- revision 4: provenance-first layout --- */
+  .band { display: flex; flex-direction: column; gap: 6px; }
+  .band-track {
+    position: relative; height: 12px; border-radius: 6px;
+    background: var(--bg-sunken); border: 1px solid var(--line);
+  }
+  .band-fill {
+    position: absolute; top: 0; height: 100%; border-radius: 6px;
+    background: linear-gradient(90deg, var(--good), var(--accent));
+    opacity: 0.85;
+  }
+  .band-scale {
+    display: flex; justify-content: space-between;
+    font-size: 11px; color: var(--text-dim);
+    font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  }
+  .section-head {
+    display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+    padding: 16px 20px 12px; border-bottom: 1px solid var(--line);
+  }
+  .section-head h2 {
+    margin: 0; padding: 0; border: none;
+    font-family: Georgia, serif; font-weight: 500; font-size: 16px;
+  }
+  .certainty {
+    font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase;
+    font-weight: 600; border-radius: 4px; padding: 2px 7px;
+  }
+  .certainty.fact  { color: var(--good); background: var(--good-soft); }
+  .certainty.model { color: var(--accent); background: var(--accent-soft); }
+  .certainty.other { color: var(--gain); background: var(--gain-soft); }
+  .card {
+    background: var(--bg-elev); border: 1px solid var(--line);
+    border-radius: 10px; box-shadow: var(--shadow); overflow: hidden;
+  }
+  .card-body { padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; }
+  .assumption {
+    font-size: 12px; color: var(--text-dim); line-height: 1.55;
+    background: var(--bg-sunken); border-left: 3px solid var(--accent);
+    border-radius: 0 6px 6px 0; padding: 10px 14px;
+  }
+  .assumption strong { color: var(--text); }
+  .ev-table td, .ev-table th { font-size: 12px; }
+  .ev-table td { white-space: normal; }
+  .ev-n { font-family: ui-monospace, Consolas, monospace; font-weight: 600; }
+  .ev-n.zero { color: var(--text-dim); }
+  .claims-none { color: var(--text-dim); font-style: italic; }
+  .limits { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 7px; }
+  .limits li { font-size: 12px; color: var(--text-dim); line-height: 1.55; }
+  .snapshot-note {
+    font-size: 11.5px; color: var(--text-dim);
+    border: 1px dashed var(--line); border-radius: 8px; padding: 10px 14px;
+  }
+  .not-saving-row { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+</style>
+
+<div class="page">
+  <div class="header-row">
+    <div>
+      <div class="eyebrow-row">
+        <span class="eyebrow">x1-search connector &middot; cost report</span>
+        <span class="coef-chip">coefficients 2026-07-31r6</span>
+      </div>
+      <h1>What x1 cost, and what the alternative would have</h1>
+      <div class="subtitle">Snapshot of 8 recorded calls &middot; Jul 31, 2026</div>
+    </div>
+  </div>
+
+  <div class="snapshot-note">
+    <strong>This is a static snapshot</strong>, not a live view &mdash; captured from one <code>x1_cost_savings</code>
+    response at 14:34 on Jul 31, 2026. Statistics were reset earlier in this same session (14:31), so this covers
+    only ~3 minutes and 8 calls &mdash; a thinner sample than a full day's usage would give. Re-run the tool for
+    current numbers.
+  </div>
+
+  <div class="card">
+    <div class="section-head">
+      <h2>Observed</h2>
+      <span class="certainty fact">measured &middot; no model</span>
+    </div>
+    <div class="card-body">
+      <div class="stat-grid">
+        <div class="stat">
+          <div class="stat-value num">8</div>
+          <div class="stat-key">Tool calls</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value num">33,022</div>
+          <div class="stat-key">x1 tokens into context</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value num">214</div>
+          <div class="stat-key">Items returned</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value num">199 ms</div>
+          <div class="stat-key">Avg. bridge round-trip</div>
+        </div>
+      </div>
+      <div class="footnote" style="padding:0">
+        These are counted, not modelled. Token counts use ~4 characters per token &mdash; close for prose,
+        looser for code, URLs and CJK &mdash; and average latency covers the bridge's own X1 round-trip only.
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="section-head">
+      <h2>Versus the curated M365 / Gmail / Drive connector</h2>
+      <span class="certainty model">estimated &middot; bounded</span>
+    </div>
+    <div class="card-body">
+      <div class="band">
+        <div class="hero-label">Tokens the connector would have put in context for the same retrievals</div>
+        <div class="hero-figure num" style="font-size:34px">28.7K <small>to</small> 42.4K <small>saved</small></div>
+        <div class="band-track">
+          <div class="band-fill" style="left: 41.8%; width: 20%;"></div>
+        </div>
+        <div class="band-scale">
+          <span>0%</span>
+          <span>41.8% &ndash; 61.8% fewer tokens</span>
+          <span>100%</span>
+        </div>
+      </div>
+
+      <div class="assumption">
+        <strong>Quote the low end.</strong> This is not a confidence interval &mdash; it is the span between the
+        most and the least the current evidence supports, and it <em>widens</em> when a coefficient rests on few
+        paired measurements. A wide band means thin calibration, not a large win.
+      </div>
+
+      <div class="assumption">
+        <strong>How the alternative behaves &mdash; measured, not assumed:</strong> the connector's
+        <code>read_resource</code> returns <em>extracted text inlined in its response</em> for binaries. A
+        OneDrive .xlsx and a 75&nbsp;KB .pdf both came back as parsed text in context &mdash; no path option,
+        no base64, long content truncated rather than paged. So the client is not the deciding variable:
+        Claude Code and Claude Desktop behave identically here.
+      </div>
+
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Category</th>
+              <th class="num-col">Calls</th>
+              <th class="num-col">Tokens saved</th>
+              <th class="num-col">Avg time</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="cat-name">x1_search <span class="mode-chip">discovery</span>
+                <span class="cat-sub">vs. the connector's own search result rows &mdash; measured 1.62&times;&ndash;2.13&times;, n=2</span>
+              </td>
+              <td class="num-col num">6</td>
+              <td class="num-col num saved-cell">35.5K</td>
+              <td class="num-col num">257 ms</td>
+            </tr>
+            <tr>
+              <td class="cat-name">x1_list_sources
+                <span class="cat-sub">bookkeeping call &mdash; no retrieval counterfactual</span>
+              </td>
+              <td class="num-col num">1</td>
+              <td class="num-col claims-none">&mdash;</td>
+              <td class="num-col num">51 ms</td>
+            </tr>
+            <tr>
+              <td class="cat-name">x1_cost_savings
+                <span class="cat-sub">bookkeeping call &mdash; no retrieval counterfactual</span>
+              </td>
+              <td class="num-col num">1</td>
+              <td class="num-col claims-none">&mdash;</td>
+              <td class="num-col num">0 ms</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="footnote" style="padding:0">
+        All 6 discovery calls this session were <code>x1_search</code> &mdash; no <code>x1_get_content</code>,
+        <code>x1_extract_file</code>, or preview calls, so the structured/tabular, image/OCR, and file-path
+        categories from earlier sessions simply don't appear here. At Claude Sonnet input pricing that is roughly
+        <strong>$0.01 to $0.13</strong> &mdash; the low end assumes cached input ($0.30/M), the high end uncached
+        ($3/M). The upper figure is a ceiling, not an expectation.
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="section-head">
+      <h2>Counted separately &mdash; not token savings</h2>
+      <span class="certainty other">excluded from the estimate</span>
+    </div>
+    <div class="card-body">
+      <div class="not-saving-row">
+        <div class="gain-badge num">0</div>
+        <div class="gain-copy">
+          <div class="gain-title">Tokens deferred, not saved</div>
+          <div class="gain-desc">
+            Kept out of context because x1 returned a file path rather than the content. None this session &mdash;
+            every call was <code>x1_search</code> or bookkeeping, so nothing was deferred for later reading.
+          </div>
+        </div>
+      </div>
+      <div class="not-saving-row">
+        <div class="gain-badge num">0</div>
+        <div class="gain-copy">
+          <div class="gain-title">Capability gains</div>
+          <div class="gain-desc">
+            Items no curated connector could reach at all &mdash; local files not mirrored to any cloud it can
+            call. None in this sample: every source searched (Files, OneDrive, MSMail, Teams, SP365) is one the
+            connector can also reach, so none of them qualified.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="section-head">
+      <h2>Evidence behind each coefficient</h2>
+      <span class="certainty model">provenance</span>
+    </div>
+    <div class="table-scroll">
+      <table class="ev-table">
+        <thead>
+          <tr>
+            <th>Category</th>
+            <th class="num-col">Paired samples</th>
+            <th>Claims</th>
+            <th>Basis</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="cat-name">Metadata / search</td>
+            <td class="num-col ev-n">2</td>
+            <td>floor 1.62&times;, ceiling 2.13&times;</td>
+            <td>x1_search rows (570&ndash;615 chars) vs outlook_email_search rows (1,220&ndash;1,310 chars)</td>
+          </tr>
+          <tr>
+            <td class="cat-name">Text-native content</td>
+            <td class="num-col ev-n">1</td>
+            <td>floor 1.47&times;, ceiling 2.17&times;</td>
+            <td>x1 extracted text (6,989 chars) vs read_resource HTML body (15,306 chars)</td>
+          </tr>
+          <tr>
+            <td class="cat-name">Structured / tabular</td>
+            <td class="num-col ev-n zero">0</td>
+            <td class="claims-none">nothing &mdash; unmeasured</td>
+            <td>No paired xlsx/csv sample collected. Claims nothing until one exists.</td>
+          </tr>
+          <tr>
+            <td class="cat-name">Image / OCR-required</td>
+            <td class="num-col ev-n zero">0</td>
+            <td class="claims-none">ceiling only</td>
+            <td>Cited industry figure ~1,500 vision tokens per rendered page; not independently measured, so it
+                sets no floor.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="section-head">
+      <h2>Known limitations</h2>
+      <span class="certainty other">read before quoting</span>
+    </div>
+    <div class="card-body">
+      <ul class="limits">
+        <li>Coefficients rest on 1&ndash;2 paired samples per category and are vendor-derived, not measured on
+            your data. The bands widen to reflect that; they do not remove it.</li>
+        <li>The multiple is applied proportionally, but part of the connector's overhead (tracking URLs,
+            duplicated identifiers) is fixed per item &mdash; so short items are under-credited and long ones
+            over-credited.</li>
+        <li>Structured/tabular content claims nothing at all: no paired xlsx/csv measurement has been taken.</li>
+        <li>The connector's real chain for an email body is <code>search</code> + <code>read_resource</code>
+            (two calls); this compares one call against one, under-counting its cost.</li>
+        <li>Cloud tables (OneDrive/GDrive/SP365) expose opaque item ids, so tabular and scanned cloud content
+            cannot be classified by extension and is priced as text &mdash; another under-count.</li>
+        <li>Token counts are characters &divide; 4, not a real tokenizer. The error largely cancels in a ratio
+            but not in absolute figures.</li>
+      </ul>
+      <div class="footnote" style="padding:0">
+        Every one of these leans toward claiming <em>less</em>. The honest way to remove them is to run the
+        paired measurements on your own mail and files rather than inherit these coefficients.
+      </div>
+    </div>
+  </div>
+
+  <div class="reset-row">
+    <div class="reset-copy">Start a new tracking period &mdash; clears all accumulated stats.</div>
+    <button class="reset-btn" onclick="document.getElementById('reset-toast').style.display='inline'">Reset statistics</button>
+    <span class="toast" id="reset-toast">Just tell Claude: "reset my x1 token savings stats."</span>
+  </div>
+</div>
