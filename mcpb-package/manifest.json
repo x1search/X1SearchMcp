@@ -5,7 +5,7 @@
   "description": "Search and preview your own content from Claude — local files, Outlook/Exchange/Gmail email and attachments, cloud files (OneDrive, GDrive, Dropbox, SharePoint), and chat (Teams, Slack) — powered by your local X1 Search index.",
   "author": {
     "name": "X1 Discovery, Inc.",
-    "url": "https://www.x1.com"
+    "url": "https://github.com/x1search"
   },
   "display_name": "X1 Search",
   "homepage": "https://www.x1.com",
