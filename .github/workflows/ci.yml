@@ -12,6 +12,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Put MSBuild on PATH
+        uses: microsoft/setup-msbuild@v2
+
       - name: Build and run tests
         run: .\run-tests.bat Release
         shell: cmd
