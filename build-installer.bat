@@ -334,6 +334,13 @@ if exist "%SCRIPT_DIR%cowork-plugin\.claude-plugin\plugin.json" (
   echo  NOTE: cowork-plugin not found; skipping Cowork plugin build.
 )
 
+REM Build the GitHub Copilot plugin -> installer\copilot-plugin\ + installer\x1-search-copilot.plugin
+if exist "%SCRIPT_DIR%copilot-plugin\.claude-plugin\plugin.json" (
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%build-copilot-plugin.ps1" -Flavor %FLAVOR%
+) else (
+  echo  NOTE: copilot-plugin not found; skipping GitHub Copilot plugin build.
+)
+
 REM Build the MCPB desktop extension -> installer\x1-search.mcpb (Lean payload always, regardless
 REM of %FLAVOR% - see build-mcpb.ps1 header for why). Soft-skipped if the mcpb CLI isn't installed,
 REM since a missing dev-machine tool must not block the Cowork plugin / installer build.
@@ -370,7 +377,7 @@ if /i "%FLAVOR%"=="Lean" (
   echo     bundled net10 X1McpGraphQL.exe. Build needed the .NET 10 SDK.
 )
 echo.
-echo   To install for all Claude products (Desktop + Claude Code):
+echo   To install for every supported client (Claude Desktop + Claude Code + GitHub Copilot):
 echo     powershell -ExecutionPolicy Bypass -File "%STAGE%\install.ps1"
 echo.
 echo   To install for Claude Desktop only:
@@ -378,6 +385,18 @@ echo     powershell -ExecutionPolicy Bypass -File "%STAGE%\install.ps1" -Target 
 echo.
 echo   To install for Claude Code (CLI) only:
 echo     powershell -ExecutionPolicy Bypass -File "%STAGE%\install.ps1" -Target Code
+echo.
+echo   To install for the GitHub Copilot app / Copilot CLI only:
+echo     powershell -ExecutionPolicy Bypass -File "%STAGE%\install.ps1" -Target Copilot
+echo.
+echo   Or install the Copilot plugin instead of using -Target Copilot:
+echo     copilot plugin install "%STAGE%\copilot-plugin"
+echo     ^(the DIRECTORY, by absolute path - the .plugin zip and relative paths are both rejected^)
+echo.
+echo   Or run it without installing:
+echo     copilot --plugin-dir "%STAGE%\copilot-plugin"
+echo     ^(this route does NOT enable the plugin, so add "x1-search": true under enabledPlugins in
+echo      %%USERPROFILE%%\.copilot\settings.json or its MCP server will not start^)
 echo.
 echo   To install to a custom directory:
 echo     powershell -ExecutionPolicy Bypass -File "%STAGE%\install.ps1" -InstallDir "C:\MyPath"

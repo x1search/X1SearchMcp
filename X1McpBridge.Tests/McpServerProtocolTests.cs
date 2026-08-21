@@ -239,7 +239,7 @@ namespace X1.McpBridge.Tests
                 @"{ ""name"": ""x1_version"", ""arguments"": {} }"));
             var info = JObject.Parse(r["result"]["content"][0]["text"].ToString());
 
-            Assert.That(info["detectedClaudeProcesses"], Is.TypeOf<JArray>());
+            Assert.That(info["detectedClientProcesses"], Is.TypeOf<JArray>());
         }
 
         [Test]

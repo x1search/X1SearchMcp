@@ -43,6 +43,14 @@ cowork-plugin/connector/
 cowork-plugin/skills/
 *.plugin
 
+# GitHub Copilot plugin: staged payload + the unzipped directory build-copilot-plugin.ps1 emits
+# into installer/. The directory is an output in its own right, not just an unzipping convenience:
+# `copilot plugin install` takes no local path, so a local build is consumed via --plugin-dir,
+# which needs the tree on disk. (The .plugin zip itself is already covered by *.plugin above.)
+copilot-plugin/connector/
+copilot-plugin/skills/
+installer/copilot-plugin/
+
 # MCPB desktop extension: staged payload + packaged artifact (built by build-mcpb.ps1)
 mcpb-package/server/
 *.mcpb

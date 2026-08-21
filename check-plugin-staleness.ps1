@@ -88,7 +88,12 @@ if (-not $Flavor) {
 # Source paths that actually feed the package. install.ps1 and build-installer.bat were previously
 # absent from this list even though they ship in / define the package, so a change to either reported
 # UP TO DATE. ../X1McpGraphQL only feeds a Full package.
-$feedPaths = @("X1McpBridge", "cowork-plugin", "skill", "install.ps1", "build-installer.bat")
+#
+# copilot-plugin is included even though this script only ever inspects an installed COWORK plugin:
+# both packages are built from one build-installer.bat run and shipped as one release, so a
+# copilot-plugin-only change still means the deployed artifacts are behind source. Reporting
+# UP TO DATE there would be the same false negative install.ps1 used to produce.
+$feedPaths = @("X1McpBridge", "cowork-plugin", "copilot-plugin", "skill", "install.ps1", "build-installer.bat")
 if ($Flavor -eq "Full") { $feedPaths += "../X1McpGraphQL" }
 
 Write-Host ""

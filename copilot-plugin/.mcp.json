@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "x1-search": {
+      "type": "local",
+      "command": "${CLAUDE_PLUGIN_ROOT}/connector/X1McpBridge.exe",
+      "args": ["--proxy"],
+      "tools": ["*"]
+    }
+  }
+}

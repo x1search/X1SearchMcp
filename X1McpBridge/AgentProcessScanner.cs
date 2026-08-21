@@ -16,9 +16,9 @@ using Newtonsoft.Json.Linq;
 namespace X1.McpBridge
 {
     /// <summary>
-    /// Detects the version of whatever Claude application is actually driving this MCP connection,
+    /// Detects the version of whatever agent application is actually driving this MCP connection,
     /// by inspecting other processes on the machine rather than trusting anything self-reported over
-    /// the wire.
+    /// the wire. Covers both Claude products and the GitHub Copilot desktop app.
     ///
     /// MCP's own initialize handshake carries a client-declared clientInfo {name, version}, but
     /// that's only as accurate as the specific integration layer that populates it - in the
@@ -33,6 +33,11 @@ namespace X1.McpBridge
     /// PE file's Win32 version resource - readable via FileVersionInfo with zero cooperation from
     /// whichever spawned this connector. ProductName ("Claude" vs "Claude Code") is what
     /// disambiguates the two, since they're otherwise identically-named files at different paths.
+    ///
+    /// The GitHub Copilot desktop app works the same way, with one wrinkle: its binary is named
+    /// github.exe, which - unlike claude.exe - is a name an unrelated program could plausibly use.
+    /// So Copilot is matched on the version resource rather than the image name alone (see
+    /// ScannedProcesses).
     ///
     /// Bitness note: this connector ships Prefer32Bit (confirmed via corflags: 32BITPREF=1), so it
     /// runs as a 32-bit WOW64 process even on a 64-bit machine - and a 32-bit process cannot read a
@@ -53,22 +58,44 @@ namespace X1.McpBridge
     {
         public const string ProductNameClaudeCode = "Claude Code";
         public const string ProductNameClaudeDesktop = "Claude";
+        public const string ProductNameCopilot = "GitHub Copilot";
 
         /// <summary>
-        /// Scans every running "claude"-named process and reports each DISTINCT
-        /// (productName, productVersion, path) combination found - deduped rather than one row per
-        /// OS process, since a single Claude Desktop install fans out into many same-version
-        /// Electron helper processes (main, renderer, GPU, utility, ...) that would otherwise flood
-        /// this diagnostic with near-duplicate rows.
+        /// Process image names to scan, each paired with the ProductName that image is REQUIRED to
+        /// declare for its processes to count (null = accept whatever it declares).
+        ///
+        /// "claude" is deliberately unfiltered. That is the long-standing behaviour, and both Claude
+        /// products legitimately report different ProductNames from the same image name - so a
+        /// filter here would be a hardcoded list of Claude product names that a rename on their side
+        /// silently breaks, trading a real capability for no real protection.
+        ///
+        /// "github" IS filtered, because the trade-off inverts: github.exe is a name a wholly
+        /// unrelated program could plausibly ship, and the Copilot app's own version resource is a
+        /// cheap, reliable discriminator (ProductName "GitHub Copilot", CompanyName "GitHub Inc.").
+        /// Matched on ProductName rather than CompanyName so this stays specific to the Copilot app
+        /// instead of accepting any GitHub-published binary that happens to be named github.exe.
+        /// </summary>
+        private static readonly KeyValuePair<string, string>[] ScannedProcesses =
+        {
+            new KeyValuePair<string, string>("claude", null),
+            new KeyValuePair<string, string>("github", ProductNameCopilot)
+        };
+
+        /// <summary>
+        /// Scans every running process named in <see cref="ScannedProcesses"/> and reports each
+        /// DISTINCT (productName, productVersion, path) combination found - deduped rather than one
+        /// row per OS process, since a single Claude Desktop or Copilot install fans out into many
+        /// same-version Electron helper processes (main, renderer, GPU, utility, ...) that would
+        /// otherwise flood this diagnostic with near-duplicate rows.
         ///
         /// Never throws - this feeds a diagnostic call (x1_version). Unlike RelayProcessScanner's
         /// X1McpBridge/X1McpGraphQL scan, where every relay instance matters and an unreadable one is
-        /// itself a finding worth surfacing, a "claude" process whose path/version can't be read
+        /// itself a finding worth surfacing, a matched process whose path/version can't be read
         /// (e.g. cross-user-session access denied) is silently skipped here rather than reported as
         /// an error row - one unreadable Electron helper process among a dozen identical siblings
         /// isn't informative on its own.
         /// </summary>
-        public static JArray ScanClaudeProcesses()
+        public static JArray ScanAgentProcesses()
         {
             var result = new JArray();
             foreach (var identity in DistinctIdentities())
@@ -94,12 +121,12 @@ namespace X1.McpBridge
 
         /// <summary>
         /// XS-1684: every distinct detected client folded into one (name, version) pair for
-        /// ReportClientInfo, which takes a single value per field. When both the desktop app and
-        /// Claude Code are running the x1_version diagnostic shows the full array, but the old
-        /// single-pick reported only one; this reports them all so the X1 Search Options tab
-        /// reflects everything that's connected. Returns null when no "claude"-named process could
-        /// be read at all, so the caller falls back to the MCP-declared clientInfo. See the
-        /// class-level caveat - still correlation, not lineage.
+        /// ReportClientInfo, which takes a single value per field. When more than one is running -
+        /// the desktop app and Claude Code, or Claude Code and Copilot - the x1_version diagnostic
+        /// shows the full array, but the old single-pick reported only one; this reports them all so
+        /// the X1 Search Options tab reflects everything that's connected. Returns null when no
+        /// matching process could be read at all, so the caller falls back to the MCP-declared
+        /// clientInfo. See the class-level caveat - still correlation, not lineage.
         /// </summary>
         public static ClientIdentity? GetConcatenatedIdentity() => ConcatenateIdentities(DistinctIdentities());
 
@@ -138,43 +165,60 @@ namespace X1.McpBridge
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var identities = new List<ClientIdentity>();
 
-            Process[] procs;
-            try
+            foreach (var scanned in ScannedProcesses)
             {
-                procs = Process.GetProcessesByName("claude");
-            }
-            catch
-            {
-                return identities;
-            }
+                string imageName = scanned.Key;
+                string requiredProductName = scanned.Value;
 
-            foreach (var p in procs)
-            {
+                Process[] procs;
                 try
                 {
-                    string path = TryGetProcessPath(p);
-                    if (string.IsNullOrEmpty(path))
-                        continue;
-
-                    FileVersionInfo vi;
-                    try { vi = FileVersionInfo.GetVersionInfo(path); }
-                    catch { continue; }
-
-                    string key = (vi.ProductName ?? "") + "|" + (vi.ProductVersion ?? "") + "|" + path;
-                    if (!seen.Add(key))
-                        continue;
-
-                    identities.Add(new ClientIdentity
-                    {
-                        ProductName = vi.ProductName,
-                        ProductVersion = vi.ProductVersion,
-                        CompanyName = vi.CompanyName,
-                        Path = path
-                    });
+                    procs = Process.GetProcessesByName(imageName);
                 }
-                finally
+                catch
                 {
-                    p.Dispose();
+                    // Skip this image name only, rather than abandoning the whole scan. Worth being
+                    // explicit about: the single-name version of this method returned early here,
+                    // so once there is more than one name to scan, a failure enumerating the second
+                    // would have thrown away every process already found under the first - i.e.
+                    // x1_version would report no client at all rather than the ones it did see.
+                    continue;
+                }
+
+                foreach (var p in procs)
+                {
+                    try
+                    {
+                        string path = TryGetProcessPath(p);
+                        if (string.IsNullOrEmpty(path))
+                            continue;
+
+                        FileVersionInfo vi;
+                        try { vi = FileVersionInfo.GetVersionInfo(path); }
+                        catch { continue; }
+
+                        // Ordinal, not culture-aware: this compares a Win32 version-resource string
+                        // against a literal, and neither is user-facing text to be collated.
+                        if (requiredProductName != null &&
+                            !string.Equals(vi.ProductName, requiredProductName, StringComparison.Ordinal))
+                            continue;
+
+                        string key = (vi.ProductName ?? "") + "|" + (vi.ProductVersion ?? "") + "|" + path;
+                        if (!seen.Add(key))
+                            continue;
+
+                        identities.Add(new ClientIdentity
+                        {
+                            ProductName = vi.ProductName,
+                            ProductVersion = vi.ProductVersion,
+                            CompanyName = vi.CompanyName,
+                            Path = path
+                        });
+                    }
+                    finally
+                    {
+                        p.Dispose();
+                    }
                 }
             }
 
