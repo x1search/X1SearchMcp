@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "x1-search": {
-      "command": "C:\\\\Path\\\\To\\\\X1McpBridge.exe",
-      "args": []
+      "command": "C:\\Path\\To\\X1McpBridge.exe",
+      "args": ["--proxy"]
     }
   }
 }

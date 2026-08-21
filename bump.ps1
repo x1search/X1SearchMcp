@@ -100,80 +100,78 @@ if (-not $verify.Success -or $verify.Groups[1].Value -ne $new) {
     exit 1
 }
 
-# --- Keep the plugin manifest in step -----------------------------------------------------
-# plugin.json's version must be semver (MAJOR.MINOR.PATCH) - a four-part string is not valid
-# there - so the connector's REVISION becomes the plugin's PATCH: 1.0.0.7 -> 1.0.7.
+# --- Keep the derived manifests in step ----------------------------------------------------
+# A manifest's version must be semver (MAJOR.MINOR.PATCH) - a four-part string is not valid there -
+# so the connector's REVISION becomes the manifest's PATCH: 1.0.0.7 -> 1.0.7.
 #
-# This is not cosmetic. Claude Code pins a plugin to whatever version string the manifest
-# declares and only ships users an update when it changes, so a manifest left at a fixed
-# version means republishing silently delivers nothing.
-$pluginJson = Join-Path $PSScriptRoot "cowork-plugin\.claude-plugin\plugin.json"
-$pluginVersion = $null
-if (Test-Path $pluginJson) {
-    $np = $new.Split('.')
+# This is not cosmetic. Claude Code and GitHub Copilot both pin a plugin to whatever version string
+# its manifest declares, and only ship users an update when that string changes - so a manifest left
+# at a fixed version means republishing silently delivers nothing.
+#
+# ANY NEW MANIFEST MUST BE REGISTERED IN $derivedManifests BELOW, or it will never update for users
+# and nothing will say so.
+$np = $new.Split('.')
 
-    # BUILD has no slot in the 3-part mapping. Bumping only the revision (the normal path)
-    # never trips this; an explicit version that moves BUILD would silently collide with, or
-    # even go backwards from, an already-published plugin version - so say so rather than
-    # quietly emit a number that means something different.
-    if ($np[2] -ne '0') {
-        Write-Warning "Connector version '$new' has a non-zero BUILD ($($np[2])), which the plugin's"
-        Write-Warning "  and MCPB manifest's MAJOR.MINOR.PATCH mapping cannot represent - both map on"
-        Write-Warning "  REVISION alone. Both will read $($np[0]).$($np[1]).$($np[3]); check that this still moves forwards."
-    }
+# BUILD has no slot in the 3-part mapping. Bumping only the revision (the normal path) never trips
+# this; an explicit version that moves BUILD would silently collide with, or even go backwards from,
+# an already-published version - so say so rather than quietly emit a number that means something
+# different.
+if ($np[2] -ne '0') {
+    Write-Warning "Connector version '$new' has a non-zero BUILD ($($np[2])), which the manifests'"
+    Write-Warning "  MAJOR.MINOR.PATCH mapping cannot represent - they all map on REVISION alone."
+    Write-Warning "  Every one of them will read $($np[0]).$($np[1]).$($np[3]); check that this still moves forwards."
+}
 
-    $pluginVersion = "{0}.{1}.{2}" -f $np[0], $np[1], $np[3]
-    $rawJson = Read-TextFile $pluginJson
+$pluginVersion = "{0}.{1}.{2}" -f $np[0], $np[1], $np[3]
+
+# One writer for the whole mapping, called once per manifest. Three copies of this block is how two
+# of them would eventually disagree about what REVISION maps to - and the third would be the one
+# nobody noticed had quietly stopped updating.
+function Set-JsonVersion([string]$Path, [string]$NewVersion, [string]$Label) {
+    $rawJson = Read-TextFile $Path
 
     # Targeted replace rather than ConvertTo-Json, which would reformat the whole manifest.
-    $updatedJson = $rawJson -replace '("version"\s*:\s*")[^"]*(")', "`${1}$pluginVersion`${2}"
+    $updatedJson = $rawJson -replace '("version"\s*:\s*")[^"]*(")', "`${1}$NewVersion`${2}"
     if ($updatedJson -eq $rawJson) {
-        Write-Error "Could not update '$pluginJson': no \"version\" field matched."
+        Write-Error "Could not update '$Path': no \"version\" field matched."
         exit 1
     }
-    Write-TextFile $pluginJson $updatedJson
+    Write-TextFile $Path $updatedJson
 
-    $verifyJson = [regex]::Match((Read-TextFile $pluginJson), '"version"\s*:\s*"([^"]*)"')
-    if (-not $verifyJson.Success -or $verifyJson.Groups[1].Value -ne $pluginVersion) {
-        Write-Error "Write-back verification failed: plugin.json does not now contain '$pluginVersion'."
+    # Read it back for the same reason version.props is: a bad write here ships a package stamped
+    # with a version that never existed, which is worse than not versioning it at all.
+    $verifyJson = [regex]::Match((Read-TextFile $Path), '"version"\s*:\s*"([^"]*)"')
+    if (-not $verifyJson.Success -or $verifyJson.Groups[1].Value -ne $NewVersion) {
+        Write-Error "Write-back verification failed: $Label does not now contain '$NewVersion'."
         exit 1
     }
 }
-else {
-    Write-Warning "cowork-plugin\.claude-plugin\plugin.json not found - plugin version not updated."
+
+$derivedManifests = [ordered]@{
+    "cowork-plugin\.claude-plugin\plugin.json"  = "Cowork / Claude Code plugin"
+    "copilot-plugin\.claude-plugin\plugin.json" = "GitHub Copilot plugin"
+    "mcpb-package\manifest.json"                = "MCPB desktop extension"
 }
 
-# --- Keep the MCPB manifest in step ---------------------------------------------------------
-# Same MAJOR.MINOR.PATCH mapping as plugin.json above (REVISION -> PATCH), reusing $pluginVersion
-# rather than computing it a second time - two independent "what does REVISION map to" writers is
-# how they'd eventually disagree.
-$mcpbManifest = Join-Path $PSScriptRoot "mcpb-package\manifest.json"
-if ($pluginVersion -and (Test-Path $mcpbManifest)) {
-    $rawMcpb = Read-TextFile $mcpbManifest
-    $updatedMcpb = $rawMcpb -replace '("version"\s*:\s*")[^"]*(")', "`${1}$pluginVersion`${2}"
-    if ($updatedMcpb -eq $rawMcpb) {
-        Write-Error "Could not update '$mcpbManifest': no \"version\" field matched."
-        exit 1
+$updatedManifests = [ordered]@{}
+foreach ($rel in $derivedManifests.Keys) {
+    $manifestPath = Join-Path $PSScriptRoot $rel
+    if (Test-Path $manifestPath) {
+        Set-JsonVersion $manifestPath $pluginVersion $derivedManifests[$rel]
+        $updatedManifests[$rel] = $derivedManifests[$rel]
     }
-    Write-TextFile $mcpbManifest $updatedMcpb
-
-    $verifyMcpb = [regex]::Match((Read-TextFile $mcpbManifest), '"version"\s*:\s*"([^"]*)"')
-    if (-not $verifyMcpb.Success -or $verifyMcpb.Groups[1].Value -ne $pluginVersion) {
-        Write-Error "Write-back verification failed: manifest.json does not now contain '$pluginVersion'."
-        exit 1
+    else {
+        Write-Warning "$rel not found - its version was not updated."
     }
-}
-elseif (-not (Test-Path $mcpbManifest)) {
-    Write-Warning "mcpb-package\manifest.json not found - MCPB manifest version not updated."
 }
 
 Write-Host ""
 Write-Host "  Version bumped: $current -> $new" -ForegroundColor Green
-if ($pluginVersion) {
-    Write-Host "  plugin.json:    $pluginVersion  (semver: connector's revision is the plugin's patch)" -ForegroundColor Green
-    if (Test-Path $mcpbManifest) {
-        Write-Host "  manifest.json:  $pluginVersion  (same mapping, MCPB desktop extension)" -ForegroundColor Green
-    }
+foreach ($rel in $updatedManifests.Keys) {
+    Write-Host ("  {0,-43} {1}  ({2})" -f $rel, $pluginVersion, $updatedManifests[$rel]) -ForegroundColor Green
+}
+if ($updatedManifests.Count -gt 0) {
+    Write-Host "  semver mapping: the connector's REVISION is each manifest's PATCH." -ForegroundColor Green
 }
 Write-Host ""
 Write-Host "  Rebuild for this to reach the binaries:"

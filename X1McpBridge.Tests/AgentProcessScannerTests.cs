@@ -12,11 +12,12 @@ namespace X1.McpBridge.Tests
 {
     /// <summary>
     /// XS-1684: AgentProcessScanner.ConcatenateIdentities is the pure join half of
-    /// GetConcatenatedIdentity - it folds every distinct detected Claude client into the single
-    /// (name, version) pair ReportClientInfo accepts, so both the desktop app and Claude Code reach
-    /// the X1 Search service host when both are running (x1_version reports them as an array). The
-    /// join is tested here with hand-built identities rather than a live process scan, which is
-    /// non-deterministic across machines/CI.
+    /// GetConcatenatedIdentity - it folds every distinct detected agent client into the single
+    /// (name, version) pair ReportClientInfo accepts, so every one of them reaches the X1 Search
+    /// service host when several are running (x1_version reports them as an array). The join is
+    /// tested here with hand-built identities rather than a live process scan, which is
+    /// non-deterministic across machines/CI - and doubly so now that the scan covers the GitHub
+    /// Copilot app as well as the two Claude products.
     /// </summary>
     [TestFixture]
     public class AgentProcessScannerTests
@@ -54,6 +55,24 @@ namespace X1.McpBridge.Tests
             Assert.That(result.HasValue);
             Assert.That(result.Value.ProductName, Is.EqualTo("Claude, Claude Code"));
             Assert.That(result.Value.ProductVersion, Is.EqualTo("1.26832.0, 2.1.222.0"));
+        }
+
+        [Test]
+        public void ConcatenateIdentities_ClaudeAndCopilot_AreBothReported()
+        {
+            // The scan is not Claude-only: a machine can have Claude Code and the GitHub Copilot
+            // app open at once, both driving sessions through the one shared relay. Nothing in the
+            // join is product-specific, and this pins that - a future "which product is this?"
+            // special case here would silently drop whichever one it didn't know about.
+            var result = AgentProcessScanner.ConcatenateIdentities(new[]
+            {
+                Id(AgentProcessScanner.ProductNameClaudeCode, "2.1.222.0"),
+                Id(AgentProcessScanner.ProductNameCopilot, "1.1.11")
+            });
+
+            Assert.That(result.HasValue);
+            Assert.That(result.Value.ProductName, Is.EqualTo("Claude Code, GitHub Copilot"));
+            Assert.That(result.Value.ProductVersion, Is.EqualTo("2.1.222.0, 1.1.11"));
         }
 
         [Test]

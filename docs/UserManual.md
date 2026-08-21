@@ -9,7 +9,7 @@
 4. [Configuration](#4-configuration)
    - [x1mcp.config.json](#41-x1mcpconfigjson)
    - [Default Tables Environment Variable](#42-default-tables-environment-variable)
-   - [Claude Desktop / Claude Code Registration](#43-claude-desktop--claude-code-registration)
+   - [Client Registration](#43-client-registration)
    - [Temp file cleanup](#45-temp-file-cleanup)
    - [Logging and lifecycle settings](#46-logging-and-lifecycle-settings)
 5. [Tools Reference](#5-tools-reference)
@@ -28,7 +28,7 @@
 8. [Query Syntax](#8-query-syntax)
 9. [Usage Examples](#9-usage-examples)
 10. [User Stories](#10-user-stories)
-11. [The /x1 Claude Code Skill](#11-the-x1-claude-code-skill)
+11. [The /x1 Skill](#11-the-x1-skill)
 12. [Diagnostic Tool](#12-diagnostic-tool)
 13. [Troubleshooting](#13-troubleshooting)
 
@@ -44,7 +44,7 @@ It works with **Claude Desktop**, **Claude Code** (CLI / IDE extensions), and **
 Claude (Desktop / Code / web)  ←── JSON-RPC (stdio) ──→  X1McpBridge.exe  ←── WCF ──→  X1ServiceHost
 ```
 
-For Claude Code, the installer also deploys a **`/x1` skill** that teaches Claude how to drive the connector efficiently — see [Section 11](#11-the-x1-claude-code-skill).
+For Claude Code and GitHub Copilot, the installer also deploys a **`/x1` skill** that teaches the agent how to drive the connector efficiently — see [Section 11](#11-the-x1-skill).
 
 ### 1.1 Token Economy
 
@@ -159,7 +159,8 @@ For pure email body text, x1 and the connector both return text, so the gap is t
 | **.NET Framework 4.8** | Included in Windows 10 1903+ and all Windows 11 builds |
 | **X1 Desktop** | Must be installed and have completed at least one index scan |
 | **X1ServiceHost running** | Must be running under the same Windows user account |
-| **Claude Desktop** | The bridge is registered in Claude Desktop's MCP server config |
+| **A supported client** | Claude Desktop, Claude Code, or GitHub Copilot (desktop app or CLI). The bridge is registered in that client's own MCP server config |
+| **A paid Copilot license** (Copilot only) | Copilot Free is not entitled to the CLI/app agent surface the connector plugs into. An org-provided seat also needs the org's Copilot CLI policy enabled — see [Section 13](#13-troubleshooting) |
 
 > **Note:** X1ServiceHost typically starts automatically with Windows when X1 Desktop is installed. If it is not running, the bridge will fail to connect and return an error on the first tool call.
 
@@ -183,14 +184,19 @@ The package contains `install.ps1` alongside the bridge binaries and the `/x1` s
 powershell -ExecutionPolicy Bypass -File installer\install.ps1
 ```
 
-By default it installs for **both** Claude Desktop and Claude Code. Choose a target with `-Target`:
+By default it installs for **every** supported client. Choose a target with `-Target`:
 
 | `-Target` value | Configures |
 |---|---|
-| `All` (default) | Claude Desktop **and** Claude Code |
+| `All` (default) | Claude Desktop, Claude Code **and** the GitHub Copilot app |
 | `Desktop` | Claude Desktop only (also enables claude.ai web via the Desktop relay) |
 | `Code` | Claude Code CLI / IDE extensions only |
 | `ClaudeAi` | Alias for `Desktop` |
+| `Copilot` | The GitHub Copilot desktop app and the Copilot CLI (they share `~/.copilot`) |
+
+`All` writes the Copilot registration whether or not Copilot is installed, so a machine that
+installs it later is already configured. The installer says which case it found; it never fails on
+a missing client.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File installer\install.ps1 -Target Code
@@ -201,7 +207,8 @@ The installer will:
 1. Copy all binaries to `%LOCALAPPDATA%\X1 Discovery\McpBridge\`.
 2. Deploy a default `x1mcp.config.json` (an existing file is never overwritten).
 3. **Claude Desktop** (when targeted): merge the `x1-search` entry into `%APPDATA%\Claude\claude_desktop_config.json` and offer to restart Claude Desktop.
-4. **Claude Code** (when targeted): merge the `x1-search` entry into `%USERPROFILE%\.claude\settings.json`; **install the `/x1` skill** to `%USERPROFILE%\.claude\skills\x1\`; and **pre-approve the read-only/preview tools** (`x1_search`, `x1_list_sources`, `x1_list_actions`, `x1_get_metadata`, `x1_get_content`, `x1_generate_preview`, `x1_cost_savings`) in `permissions.allow` so they stop prompting. `x1_execute_action` and `x1_reset_stats` are intentionally left to prompt — execute_action opens files and launches the browser; reset_stats permanently deletes the stats file.
+4. **Claude Code** (when targeted): merge the `x1-search` entry into `%USERPROFILE%\.claude\settings.json`; **install the `/x1` skill** to `%USERPROFILE%\.claude\skills\x1\`; and **pre-approve the read-only/preview tools** (`x1_search`, `x1_list_sources`, `x1_list_actions`, `x1_get_metadata`, `x1_get_content`, `x1_generate_preview`) in `permissions.allow` so they stop prompting. `x1_execute_action` and `x1_reset_stats` are intentionally left to prompt — execute_action opens files and launches the browser; reset_stats permanently deletes the stats file. `x1_cost_savings` is also read-only and safe to add by hand if you want it silent too.
+5. **GitHub Copilot** (when targeted): merge the `x1-search` entry into `%USERPROFILE%\.copilot\mcp-config.json` and **install the `/x1` skill** to `%USERPROFILE%\.copilot\skills\x1\`. Nothing is pre-approved: Copilot stores tool approvals in `permissions-config.json`, keyed by absolute **project directory**, so there is no machine-wide allowlist for an installer to seed — choose Copilot's "always allow" at the first prompt, or start it with `--allow-tool 'x1-search(*)'`. Copilot is **not** restarted for you, unlike Claude Desktop: it runs long-lived agent sessions in their own git worktrees, and killing it mid-session discards work.
 
 **Custom install directory:**
 
@@ -212,8 +219,9 @@ powershell -ExecutionPolicy Bypass -File installer\install.ps1 -InstallDir "D:\T
 **Uninstall** (removes the config entries, the `/x1` skill, and optionally the install directory):
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File installer\install.ps1 -Uninstall          # both
+powershell -ExecutionPolicy Bypass -File installer\install.ps1 -Uninstall          # every client
 powershell -ExecutionPolicy Bypass -File installer\install.ps1 -Uninstall -Target Code
+powershell -ExecutionPolicy Bypass -File installer\install.ps1 -Uninstall -Target Copilot
 ```
 
 > **Note — the standalone installer handles this for you.** The shared relay is deliberately kept
@@ -229,6 +237,21 @@ powershell -ExecutionPolicy Bypass -File installer\install.ps1 -Uninstall -Targe
 > Manager, or `Get-Process X1McpBridge | Stop-Process`) before updating the plugin — or simply wait
 > past the idle-shutdown threshold (1 hour by default) since the relay's last use.
 
+### GitHub Copilot as a plugin instead
+
+`build-installer.bat` also produces `installer\copilot-plugin\`, a self-contained Copilot plugin carrying both the connector and the `/x1` skill. Use it **instead of** `-Target Copilot`, not as well: each registers a server named `x1-search`, so a machine with both sees the server and the skill twice (harmless — both run `--proxy` and share the one relay — but confusing). `install.ps1` warns when it finds the plugin installed.
+
+```powershell
+# Must be an ABSOLUTE path. A relative one - with or without .\ - is rejected.
+copilot plugin install C:\X1SearchMcp\copilot-plugin
+```
+
+The argument must be an **absolute path to the directory**. A relative path (`.\copilot-plugin`) is rejected as an invalid plugin spec, and so is the `x1-search-copilot.plugin` zip — Copilot reads an archive as a repository and reports `No plugin.json found in repository`, so unzip it first. Installing this way also enables the plugin, which matters: a plugin's MCP servers only start when it is enabled, so the `copilot --plugin-dir` alternative needs an `enabledPlugins` entry or its tools silently never appear.
+
+Copilot warns that direct installs (local paths, repos, URLs) are deprecated in favour of `plugin@marketplace`. The directory route works today; a published marketplace entry is the durable one.
+
+See [copilot-plugin/README.md](../copilot-plugin/README.md) for the full matrix and for which path placeholders Copilot does and does not expand in a server's `command`.
+
 ### Manual installation
 
 1. Copy all files from the release package to a folder of your choice (e.g. `%LOCALAPPDATA%\X1 Discovery\McpBridge\`).
@@ -236,13 +259,34 @@ powershell -ExecutionPolicy Bypass -File installer\install.ps1 -Uninstall -Targe
 3. Register the server in the client config(s), adding the following inside the `mcpServers` object and adjusting the path:
    - **Claude Desktop:** `%APPDATA%\Claude\claude_desktop_config.json`
    - **Claude Code:** `%USERPROFILE%\.claude\settings.json`
+   - **GitHub Copilot:** `%USERPROFILE%\.copilot\mcp-config.json`
 
 ```json
 {
   "mcpServers": {
     "x1-search": {
       "command": "C:\\Users\\YourName\\AppData\\Local\\X1 Discovery\\McpBridge\\X1McpBridge.exe",
-      "args": []
+      "args": ["--proxy"]
+    }
+  }
+}
+```
+
+`args` **must** be `["--proxy"]`. Without it the client spawns a bridge that opens its own WCF
+connection to X1ServiceHost instead of proxying to the one shared relay — the concurrent
+`Connect()`/teardown race that crashes X1ServiceHost outright.
+
+GitHub Copilot needs two extra keys on the entry — `"type": "local"` to declare the transport, and
+a `"tools"` filter:
+
+```json
+{
+  "mcpServers": {
+    "x1-search": {
+      "type": "local",
+      "command": "C:\\Users\\YourName\\AppData\\Local\\X1 Discovery\\McpBridge\\X1McpBridge.exe",
+      "args": ["--proxy"],
+      "tools": ["*"]
     }
   }
 }
@@ -268,8 +312,8 @@ powershell -ExecutionPolicy Bypass -File installer\install.ps1 -Uninstall -Targe
 
 `x1_cost_savings` is read-only and safe to pre-approve. `x1_reset_stats` permanently deletes the stats file, so it is intentionally left to prompt — add it to `permissions.allow` only if you prefer it to run without confirmation.
 
-5. (Claude Code, optional) Copy the `skill\x1` folder to `%USERPROFILE%\.claude\skills\x1` to enable the `/x1` skill.
-6. Restart the Claude client. (In Claude Desktop, the MCP server list and tool schemas are read at startup.)
+5. (optional) Copy the `skill\x1` folder to `%USERPROFILE%\.claude\skills\x1` (Claude Code) and/or `%USERPROFILE%\.copilot\skills\x1` (GitHub Copilot) to enable the `/x1` skill.
+6. Restart the client. (In Claude Desktop and in Copilot, the MCP server list and tool schemas are read at startup.)
 
 ---
 
@@ -344,31 +388,42 @@ The environment variable takes precedence over the `defaultTables` value in the 
 2. `defaultTables` in `x1mcp.config.json`
 3. Built-in fallback: `["Files"]`
 
-### 4.3 Claude Desktop / Claude Code Registration
+### 4.3 Client Registration
 
-The bridge is registered under `mcpServers` in the client's config file:
+The bridge is registered under `mcpServers` in the client's config file. Every client uses that
+same top-level key:
 
 | Client | Config file |
 |---|---|
 | Claude Desktop | `%APPDATA%\Claude\claude_desktop_config.json` |
 | Claude Code | `%USERPROFILE%\.claude\settings.json` |
+| GitHub Copilot (app **and** CLI) | `%USERPROFILE%\.copilot\mcp-config.json` (or `$COPILOT_HOME`) |
 
-The minimal entry is the same for both:
+The minimal entry for the two Claude clients:
 
 ```json
 {
   "mcpServers": {
     "x1-search": {
       "command": "C:\\Users\\YourName\\AppData\\Local\\X1 Discovery\\McpBridge\\X1McpBridge.exe",
-      "args": []
+      "args": ["--proxy"]
     }
   }
 }
 ```
 
+Copilot's differs only by `"type": "local"` and a `"tools"` filter — see
+[Section 3 → Manual installation](#3-installation).
+
+`args` is `["--proxy"]` in every client, and that is load-bearing rather than stylistic: the shim
+forwards to the one shared relay, which is what keeps a single process owning the WCF connection to
+X1ServiceHost.
+
 Use forward-slash or escaped back-slash paths. The client must be restarted after any change to this file — the MCP server list and tool schemas are read at startup.
 
 > **Permissions (Claude Code).** Claude Code prompts before each MCP tool call unless the tool is pre-approved. The installer adds the read-only/preview tools to `permissions.allow` for you; to do it by hand, see [Section 3 → Manual installation, step 4](#3-installation). Claude Desktop has its own per-connector approval UI — choose **"Allow always"** there.
+>
+> **Permissions (GitHub Copilot).** Copilot also prompts per tool, but its saved approvals live in `%USERPROFILE%\.copilot\permissions-config.json`, which is auto-managed and keyed by absolute **project directory** — there is no machine-wide allowlist, so the installer has nothing to pre-approve. Choose Copilot's "always allow" at the first prompt, or start it with `--allow-tool 'x1-search(*)'`.
 
 ### 4.5 Temp file cleanup
 
@@ -800,7 +855,7 @@ The file at `path` is an artifact-ready HTML fragment (body content only, no out
 
 Preview cards format raw values for readability: OA-format dates become timestamps, byte sizes become KB/MB, and internal drive paths (`/drives/…/root:/…`) are shortened.
 
-> **Spreadsheets and slide decks.** `.xlsx`/`.pptx` are not extracted by `x1_generate_preview` (they return a `metadata_card`). To read their content, call [`x1_get_content`](#53-x1_get_content) with `mode: "preview"` — X1 caches the real file and returns a **local path** — then extract the text locally with the bundled `extract-office-text.ps1` (see [Section 11](#11-the-x1-claude-code-skill)). This keeps large attachments out of the model context.
+> **Spreadsheets and slide decks.** `.xlsx`/`.pptx` are not extracted by `x1_generate_preview` (they return a `metadata_card`). To read their content, call [`x1_get_content`](#53-x1_get_content) with `mode: "preview"` — X1 caches the real file and returns a **local path** — then extract the text locally with the bundled `extract-office-text.ps1` (see [Section 11](#11-the-x1-skill)). This keeps large attachments out of the model context.
 
 ### 5.8 x1_cost_savings
 Returns the accumulated cost report for this installation. Every tool call is silently recorded and compared against what the **curated Microsoft Graph / Gmail / OneDrive connector already installed on this machine** would have cost for the same retrieval — not a hypothetical raw base64 API. Stats persist to `x1mcp_stats.json` in the bridge install directory, so they survive restarts.
@@ -1401,9 +1456,9 @@ Sort the merged `results` by date and present a unified list before generating a
 
 ---
 
-## 11. The /x1 Claude Code Skill
+## 11. The /x1 Skill
 
-When installed for Claude Code, the package deploys a **`/x1` skill** to `%USERPROFILE%\.claude\skills\x1\`. A skill is a set of instructions Claude Code loads on demand; this one teaches Claude how to drive the connector efficiently and is the source for many of the conventions in this manual.
+When installed for Claude Code, the package deploys a **`/x1` skill** to `%USERPROFILE%\.claude\skills\x1\`; when installed for GitHub Copilot, the same skill goes to `%USERPROFILE%\.copilot\skills\x1\`. A skill is a set of instructions the client loads on demand; this one teaches the agent how to drive the connector efficiently and is the source for many of the conventions in this manual.
 
 **What it provides**
 
@@ -1423,7 +1478,7 @@ It handles `.docx` (paragraphs), `.pptx` (per-slide text), and `.xlsx` (shared-s
 
 **Invoking it**
 
-The skill triggers automatically when you ask Claude to find or preview your own content ("find the latest deck so-and-so sent me", "preview that contract"), or you can invoke it explicitly with `/x1`. It is a Claude Code feature; Claude Desktop does not use `~/.claude/skills`.
+The skill triggers automatically when you ask the agent to find or preview your own content ("find the latest deck so-and-so sent me", "preview that contract"), or you can invoke it explicitly with `/x1`. Skills are a Claude Code and GitHub Copilot feature; Claude Desktop uses neither `~/.claude/skills` nor `~/.copilot/skills`.
 
 ---
 
@@ -1456,12 +1511,12 @@ Run this from a Command Prompt or PowerShell window to confirm the bridge can re
 
 ## 13. Troubleshooting
 
-### The x1-search server does not appear in Claude Desktop
+### The x1-search server does not appear in the client
 
-**Symptoms:** Claude has no knowledge of x1_search tools; no MCP server listed.
+**Symptoms:** the agent has no knowledge of x1_search tools; no MCP server listed.
 
 **Checks:**
-1. Verify `%APPDATA%\Claude\claude_desktop_config.json` contains the `x1-search` entry with the correct path to `X1McpBridge.exe`.
+1. Verify the client's own config contains the `x1-search` entry with the correct path to `X1McpBridge.exe` — `%APPDATA%\Claude\claude_desktop_config.json`, `%USERPROFILE%\.claude\settings.json`, or `%USERPROFILE%\.copilot\mcp-config.json` (see [Section 4.3](#43-client-registration)).
 2. Confirm `X1McpBridge.exe` exists at the path specified — use `dir` in Command Prompt.
 3. Restart Claude Desktop after any config change — the MCP server list is read at startup.
 4. Check that the path uses either forward slashes or properly escaped back-slashes (`\\`).
@@ -1568,7 +1623,7 @@ When asking Claude to interpret a date, provide the raw value and ask it to conv
 
 **Cause:** `x1_generate_preview` extracts `.docx` but not slide decks or spreadsheets, so those return `previewType: "metadata_card"`.
 
-**Fix:** Call `x1_get_content` with `mode: "preview"` to get a local cached path, then run the bundled `extract-office-text.ps1` on it (see [Section 11](#11-the-x1-claude-code-skill)).
+**Fix:** Call `x1_get_content` with `mode: "preview"` to get a local cached path, then run the bundled `extract-office-text.ps1` on it (see [Section 11](#11-the-x1-skill)).
 
 ---
 
@@ -1577,6 +1632,69 @@ When asking Claude to interpret a date, provide the raw value and ask it to conv
 **Cause:** MCP tools prompt unless pre-approved in `permissions.allow`.
 
 **Fix:** Re-run the installer with `-Target Code` (it adds the read-only tools), or add them by hand (see [Section 3 → Manual installation, step 4](#3-installation)), then restart Claude Code. `x1_execute_action` is intentionally left to prompt because it opens files/launches the browser. On Claude Desktop, choose **"Allow always"** in its approval dialog.
+
+---
+
+### GitHub Copilot fails before any x1-search tool runs
+
+**Symptoms:** the session dies during start-up with one of these, and `x1-search` appears **nowhere** in `%USERPROFILE%\.copilot\logs` for that session:
+
+- `You are not authorized to use this Copilot feature, it requires an enterprise or organization policy to be enabled.`
+- `Execution failed: Error: 421 "Misdirected Request"`
+
+**Cause:** both are Copilot entitlement failures, not connector failures. In the app log (`github-app.*.log`) they show up as `403 "unauthorized: not authorized to use this Copilot feature"` or `421 "Misdirected Request"` on `models.list` / `session.model.list` — GitHub's model catalog, which the app must read before it can start a session. The connector is never reached, which is why the logs mention it not at all. GitHub's own `github-mcp-server` fails identically in the same session; if it is failing too, the cause is not local.
+
+**Fixes:**
+
+1. **A paid Copilot license is required.** Copilot Free is not entitled to the CLI/app agent surface. Assign a paid seat.
+2. **If the seat comes from an organization, enable that org's Copilot CLI policy.** A policy that was never configured behaves as disabled:
+   ```powershell
+   gh api orgs/YOUR-ORG/copilot/billing --jq .cli    # must be "enabled", not "unconfigured"
+   ```
+   Set it under **Organization settings → Copilot → Policies**, and check the **Models** tab too.
+3. **After any seat or policy change, re-authenticate.** A `421` specifically means valid credentials sent to a server that is not authoritative for them — i.e. Copilot is still using the token it cached under the *previous* entitlement. Run `/logout` then `/login` in the CLI, or sign out and back in in the app.
+
+Confirm the seat is actually being used afterwards — an empty `last_activity` means it never has been:
+
+```powershell
+gh api orgs/YOUR-ORG/copilot/billing/seats --jq '.seats[] | {login: .assignee.login, last_activity: .last_activity_at}'
+```
+
+---
+
+### GitHub Copilot keeps asking permission for every x1-search call
+
+**Cause:** the same prompting, but Copilot has no equivalent of `permissions.allow`, so `-Target Copilot` cannot fix it for you. Copilot writes approvals to `%USERPROFILE%\.copilot\permissions-config.json` under the absolute path of the **project directory** you were in when you approved — so an approval granted in one repo does not carry to the next.
+
+**Fix:** choose Copilot's "always allow" option at the prompt (once per project), or start it with `--allow-tool 'x1-search(*)'`.
+
+---
+
+### x1-search appears twice in GitHub Copilot, or the /x1 skill is listed twice
+
+**Cause:** the two Copilot routes were both used. `install.ps1 -Target Copilot` (or `All`) registers `x1-search` in `~/.copilot/mcp-config.json` and installs the skill to `~/.copilot/skills/x1`; the Copilot **plugin** carries its own copy of both. A leftover `skillDirectories` entry from a manual `/skill add` does the same thing to the skill on its own.
+
+**Why it is not harmful, only confusing:** both registrations run `X1McpBridge.exe --proxy`, so they share the one relay and the WCF invariant still holds. Nothing crashes; you just see duplicates.
+
+**Fix:** pick one route. Either `copilot plugin uninstall x1-search` and keep the installer's registration, or run `install.ps1 -Uninstall -Target Copilot` and keep the plugin. For a duplicated skill, remove the stale `skillDirectories` entry from `%USERPROFILE%\.copilot\settings.json` — the installer warns about that entry but deliberately does not edit your settings array. `install.ps1` reports both conditions when it runs.
+
+---
+
+### The Copilot plugin's tools never appear, though its /x1 skill works
+
+**Cause:** a plugin's MCP servers are only started when the plugin is **enabled**. Mounting a directory with `copilot --plugin-dir` loads its skills but does not enable it, so the skill shows up and the tools silently do not.
+
+**Fix:** add the plugin to `enabledPlugins` in `%USERPROFILE%\.copilot\settings.json`:
+
+```json
+{
+  "enabledPlugins": {
+    "x1-search": true
+  }
+}
+```
+
+Plugins installed with `copilot plugin install` are enabled for you, so this only affects locally-mounted ones. If the tools are still missing, check `%USERPROFILE%\.copilot\logs` for `failed to spawn MCP server process` — Copilot expands `${VAR}` in a server's `command` but **not** `%VAR%` or `~`, and an unset `${VAR}` fails the same way a missing binary does.
 
 ---
 

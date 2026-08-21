@@ -1,8 +1,9 @@
 # X1 Search MCP Bridge
 
-A Model Context Protocol (MCP) server that connects **Claude Desktop**, **Claude Code**, and
-**claude.ai** to your local X1 Search index — search and preview your files, email and
-attachments, cloud documents (OneDrive, GDrive, Dropbox, SharePoint), and chat (Teams, Slack).
+A Model Context Protocol (MCP) server that connects **Claude Desktop**, **Claude Code**,
+**claude.ai**, and the **GitHub Copilot** app (and Copilot CLI) to your local X1 Search index —
+search and preview your files, email and attachments, cloud documents (OneDrive, GDrive, Dropbox,
+SharePoint), and chat (Teams, Slack).
 
 Full documentation: [docs/UserManual.md](docs/UserManual.md).
 
@@ -42,7 +43,7 @@ a shared relay exists at all.
 ## Install
 
 ```powershell
-# Both Claude Desktop and Claude Code (default)
+# Claude Desktop, Claude Code and GitHub Copilot (default)
 powershell -ExecutionPolicy Bypass -File installer\install.ps1
 
 # Claude Desktop only (also enables claude.ai web via the Desktop relay)
@@ -51,18 +52,44 @@ powershell -ExecutionPolicy Bypass -File installer\install.ps1 -Target Desktop
 # Claude Code only — also installs the /x1 skill and pre-approves the read-only tools
 powershell -ExecutionPolicy Bypass -File installer\install.ps1 -Target Code
 
-# Uninstall (add -Target Desktop|Code to scope it)
+# GitHub Copilot app / Copilot CLI only — also installs the /x1 skill
+powershell -ExecutionPolicy Bypass -File installer\install.ps1 -Target Copilot
+
+# Uninstall (add -Target Desktop|Code|Copilot to scope it)
 powershell -ExecutionPolicy Bypass -File installer\install.ps1 -Uninstall
 ```
 
 > Quit Claude Desktop (it minimises to the tray) and close Claude Code before re-installing —
-> the running bridge locks its own binaries.
+> the running bridge locks its own binaries. Copilot shares that relay, so quit it too.
+
+### GitHub Copilot as a plugin instead
+
+`build-installer.bat` also produces `installer\copilot-plugin\`, a self-contained Copilot plugin
+carrying both the connector and the `/x1` skill. Use it *instead of* `-Target Copilot`, not as
+well — each registers a server named `x1-search`.
+
+```powershell
+copilot plugin install <package>\copilot-plugin
+```
+
+The argument must be an **absolute path to the directory**: a relative path is rejected as an
+invalid spec, and the `x1-search-copilot.plugin` zip is rejected too (Copilot does not unpack
+archives — unzip it first). See
+[copilot-plugin/README.md](copilot-plugin/README.md) for the full matrix, the `--plugin-dir`
+alternative and its enablement gotcha, and which path placeholders Copilot does and does not
+expand.
 
 ## Requirements
 
 - Windows 10/11 with .NET Framework 4.8 (in-box on Win10 1903+/Win11).
 - X1 Desktop installed with at least one completed index scan.
 - **X1ServiceHost** running under the same Windows user account.
+- At least one supported client: Claude Desktop, Claude Code, or GitHub Copilot (the desktop app
+  or the CLI — both read the same `~/.copilot` configuration, so one install target covers both).
+- For GitHub Copilot specifically, a **paid Copilot license**. Copilot Free is not entitled to the
+  CLI/app agent surface the connector plugs into, and an org-provided seat additionally needs the
+  org's Copilot CLI policy enabled. See
+  [copilot-plugin/README.md](copilot-plugin/README.md#troubleshooting-authorization).
 
 The Lean package needs **no .NET 5+/10 runtime** on the target machine — it is net4.8 only. The
 Full package's daemon is self-contained, so it needs no installed .NET 10 runtime either, but it

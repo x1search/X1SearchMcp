@@ -9,12 +9,13 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Installs the X1 Search MCP Bridge for Claude Desktop, Claude Code, and claude.ai.
+  Installs the X1 Search MCP Bridge for Claude Desktop, Claude Code, claude.ai, and the
+  GitHub Copilot app.
 
 .DESCRIPTION
   Copies binaries to the install directory, deploys a default x1mcp.config.json
   (preserving any existing one), and registers the MCP server in the config files
-  for the selected Claude products.
+  for the selected client products.
 
   Registers each product's x1-search entry as "X1McpBridge.exe --proxy" rather than
   the bridge itself: every session now proxies through one shared X1McpGraphQL
@@ -24,20 +25,22 @@
   daemon makes that structurally impossible instead of merely unlikely.
 
   Target products:
-    All       - Claude Desktop AND Claude Code (default)
+    All       - Claude Desktop, Claude Code AND the GitHub Copilot app (default)
     Desktop   - Claude Desktop app only  (also enables claude.ai web via Desktop relay)
     Code      - Claude Code CLI / IDE extensions only  (~/.claude/settings.json)
     ClaudeAi  - Alias for Desktop (claude.ai web uses Claude Desktop as its local relay)
+    Copilot   - GitHub Copilot desktop app / Copilot CLI only  (~/.copilot/mcp-config.json)
 
   Claude Desktop config : %APPDATA%\Claude\claude_desktop_config.json
   Claude Code config    : %USERPROFILE%\.claude\settings.json
+  GitHub Copilot config : %USERPROFILE%\.copilot\mcp-config.json
 
 .PARAMETER InstallDir
   Target folder for the bridge binaries.
   Default: %LOCALAPPDATA%\X1 Discovery\McpBridge
 
 .PARAMETER Target
-  Which Claude product(s) to configure.  All | Desktop | Code | ClaudeAi
+  Which client product(s) to configure.  All | Desktop | Code | ClaudeAi | Copilot
   Default: All
 
 .PARAMETER SavedContentDir
@@ -53,15 +56,17 @@
   .\install.ps1
   .\install.ps1 -Target Desktop
   .\install.ps1 -Target Code
+  .\install.ps1 -Target Copilot
   .\install.ps1 -InstallDir "C:\Tools\X1McpBridge"
   .\install.ps1 -SavedContentDir "C:\Users\$env:USERNAME\OneDrive - Acme Corp\X1 Saves"
   .\install.ps1 -Uninstall
   .\install.ps1 -Uninstall -Target Code
+  .\install.ps1 -Uninstall -Target Copilot
 #>
 
 param(
     [string]$InstallDir = (Join-Path $env:LOCALAPPDATA "X1 Discovery\McpBridge"),
-    [ValidateSet("All", "Desktop", "Code", "ClaudeAi")]
+    [ValidateSet("All", "Desktop", "Code", "ClaudeAi", "Copilot")]
     [string]$Target = "All",
     [string]$SavedContentDir = "",
     [switch]$Uninstall
@@ -76,6 +81,7 @@ $ErrorActionPreference = "Stop"
 
 $doDesktop = $Target -in @("All", "Desktop", "ClaudeAi")
 $doCode    = $Target -in @("All", "Code")
+$doCopilot = $Target -in @("All", "Copilot")
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -229,11 +235,28 @@ $desktopCfgPath  = Join-Path $desktopCfgDir "claude_desktop_config.json"
 $codeCfgDir      = Join-Path $env:USERPROFILE ".claude"
 $codeCfgPath     = Join-Path $codeCfgDir "settings.json"
 
-# /x1 skill — shipped with the connector, installed as a Claude Code user skill.
-# Source sits next to this script (skill\x1); when run from a staged installer the
-# build step copies it alongside, so the same relative path works in both cases.
+# GitHub Copilot. ONE directory serves both the Copilot desktop app and the Copilot CLI, so a
+# single target covers both surfaces - there is deliberately no separate -Target CopilotCli.
+#
+# COPILOT_HOME is Copilot's own documented override for this directory. Honouring it matters more
+# than it looks: on a machine that relocates the config dir, ignoring it would produce a
+# perfectly successful-looking write to a directory nothing ever reads.
+$copilotCfgDir    = if ($env:COPILOT_HOME) { $env:COPILOT_HOME } else { Join-Path $env:USERPROFILE ".copilot" }
+$copilotCfgPath   = Join-Path $copilotCfgDir "mcp-config.json"
+$copilotSettings  = Join-Path $copilotCfgDir "settings.json"
+$copilotAppConfig = Join-Path $copilotCfgDir "config.json"
+
+# /x1 skill — shipped with the connector, installed as a user skill for Claude Code and for
+# GitHub Copilot. Source sits next to this script (skill\x1); when run from a staged installer
+# the build step copies it alongside, so the same relative path works in both cases.
+#
+# Copilot loads ~/.copilot/skills/<name>/ natively, which is why the Copilot install copies the
+# skill there rather than appending to the skillDirectories array in Copilot's settings.json:
+# identical shape to the Claude Code install, no mutation of a user-owned settings array, and
+# uninstall is one directory delete instead of a surgical edit to a list the user also hand-edits.
 $skillSrcDir     = Join-Path $scriptDir "skill\x1"
 $skillDestDir    = Join-Path $codeCfgDir "skills\x1"
+$copilotSkillDir = Join-Path $copilotCfgDir "skills\x1"
 
 # Read-only / preview x1-search tools to pre-approve in Claude Code so they stop prompting.
 # x1_execute_action is intentionally NOT included - it opens files / launches the browser,
@@ -343,6 +366,31 @@ if ($Uninstall) {
         }
     }
 
+    # --- GitHub Copilot ---
+    if ($doCopilot) {
+        Write-Step "Removing x1-search from GitHub Copilot config..."
+        if (Test-Path $copilotCfgPath) {
+            $cfg = Read-JsonConfig $copilotCfgPath
+            if ($cfg.PSObject.Properties["mcpServers"] -and
+                $cfg.mcpServers.PSObject.Properties["x1-search"]) {
+                $cfg.mcpServers.PSObject.Properties.Remove("x1-search")
+                Write-JsonConfig $cfg $copilotCfgPath
+                Write-OK "Removed x1-search from $copilotCfgPath"
+            }
+            else {
+                Write-Warn "x1-search not found in GitHub Copilot config."
+            }
+        }
+        else {
+            Write-Warn "GitHub Copilot config not found at $copilotCfgPath"
+        }
+
+        if (Test-Path $copilotSkillDir) {
+            Remove-Item $copilotSkillDir -Recurse -Force
+            Write-OK "Removed /x1 skill from $copilotSkillDir"
+        }
+    }
+
     # --- Shared relay: stop it and remove the Full flavor's scheduled task ---
     Write-Step "Removing the shared relay..."
 
@@ -395,6 +443,7 @@ if ($Uninstall) {
     Write-Host "  Uninstall complete." -ForegroundColor Green
     if ($doDesktop) { Write-Host "  Restart Claude Desktop for the change to take effect." }
     if ($doCode)    { Write-Host "  Restart Claude Code for the change to take effect." }
+    if ($doCopilot) { Write-Host "  Restart GitHub Copilot for the change to take effect." }
     Write-Host ""
     exit 0
 }
@@ -411,6 +460,7 @@ Write-Host "  Install directory : $InstallDir"
 Write-Host "  Target products   : $Target"
 if ($doDesktop) { Write-Host "  Desktop config    : $desktopCfgPath" }
 if ($doCode)    { Write-Host "  Claude Code config: $codeCfgPath" }
+if ($doCopilot) { Write-Host "  Copilot config    : $copilotCfgPath" }
 Write-Host ""
 
 # ---------------------------------------------------------------------------
@@ -840,6 +890,23 @@ $mcpEntry = [PSCustomObject]@{
     args    = @("--proxy")
 }
 
+# GitHub Copilot's entry carries two extra keys, and Copilot is the first target whose entry shape
+# differs at all - hence a second object rather than mutating the shared one:
+#   type  - Copilot's own "/mcp add" writes "local" for a stdio child process. Its docs also accept
+#           "stdio"; "local" is used here because it is what the app itself produces, which is the
+#           shape most likely to keep loading across Copilot updates.
+#   tools - the tool filter. "*" is every tool, i.e. the same surface every other target gets. An
+#           absent filter also means "all", but writing it explicitly matches what the app produces
+#           and means adding a tool needs no change here.
+# args stays @("--proxy") like every other target, and that is not cosmetic - see the one-relay
+# invariant in docs/build-flavors.md.
+$copilotMcpEntry = [PSCustomObject]@{
+    type    = "local"
+    command = $exePath
+    args    = @("--proxy")
+    tools   = @("*")
+}
+
 # ---------------------------------------------------------------------------
 # Step 5 — Claude Desktop
 # ---------------------------------------------------------------------------
@@ -924,6 +991,162 @@ if ($doCode) {
 }
 
 # ---------------------------------------------------------------------------
+# Step 6b — GitHub Copilot  (~/.copilot/mcp-config.json)
+#
+# Registered by merging the config file, not by shelling out to "copilot mcp add". That command
+# exists, but it needs the Copilot CLI on PATH - a separate npm install from the desktop app - so
+# it would make this the only target whose registration depends on a third-party executable being
+# present. Merging the JSON is the same mechanism every other target here uses, and it works when
+# only the desktop app is installed.
+#
+# Deliberately NOT gated on "is Copilot installed": -Target All writes this unconditionally, so a
+# machine that installs Copilot later already has a correct registration waiting. The detection
+# probe at the end of this block only decides what to TELL the user.
+# ---------------------------------------------------------------------------
+
+if ($doCopilot) {
+    Write-Step "Configuring GitHub Copilot..."
+
+    $cfg = Read-JsonConfig $copilotCfgPath
+
+    if (-not $cfg.PSObject.Properties["mcpServers"]) {
+        $cfg | Add-Member -NotePropertyName "mcpServers" -NotePropertyValue ([PSCustomObject]@{})
+    }
+
+    if ($cfg.mcpServers.PSObject.Properties["x1-search"]) {
+        # Property presence is checked before every read: Set-StrictMode -Version Latest turns a
+        # reference to a missing property into a terminating error, and this entry may have been
+        # hand-written or produced by Copilot's own /mcp add, so no key is guaranteed to be there.
+        $existingEntry = $cfg.mcpServers."x1-search"
+
+        $existingCmd = $null
+        if ($existingEntry.PSObject.Properties["command"]) { $existingCmd = $existingEntry.command }
+        if ($existingCmd -ne $exePath) {
+            Write-Warn "Replacing existing x1-search path:"
+            Write-Warn "  was: $existingCmd"
+            Write-Warn "  now: $exePath"
+        }
+
+        # Called out separately from the path change, because an entry added by hand through
+        # "/mcp add" registers the bridge with no args at all - and that difference is not
+        # cosmetic. Without --proxy the client spawns a bridge that owns its own WCF connection to
+        # X1ServiceHost instead of proxying to the shared relay, which is precisely the
+        # Connect()/teardown race that crashes X1ServiceHost. Correcting it silently would hide the
+        # single most likely cause of "Copilot keeps killing my X1 service".
+        $existingArgs = @()
+        if ($existingEntry.PSObject.Properties["args"]) { $existingArgs = @($existingEntry.args) }
+        if ($existingArgs -notcontains "--proxy") {
+            Write-Warn "The existing x1-search entry did not use --proxy (args: [$($existingArgs -join ', ')])."
+            Write-Warn "  That registration spawns its own bridge instead of sharing the one relay - the race"
+            Write-Warn "  that crashes X1ServiceHost. Corrected to --proxy."
+        }
+    }
+
+    $cfg.mcpServers | Add-Member -Force -NotePropertyName "x1-search" -NotePropertyValue $copilotMcpEntry
+    Write-JsonConfig $cfg $copilotCfgPath
+    Write-OK "Updated $copilotCfgPath"
+
+    # Install the /x1 skill as a Copilot user skill. Same source and the same remove-then-copy as
+    # the Claude Code install above; only the destination differs.
+    if (Test-Path $skillSrcDir) {
+        if (Test-Path $copilotSkillDir) { Remove-Item $copilotSkillDir -Recurse -Force }
+        New-Item -ItemType Directory -Path $copilotSkillDir -Force | Out-Null
+        Copy-Item (Join-Path $skillSrcDir '*') -Destination $copilotSkillDir -Recurse -Force
+        Write-OK "Installed /x1 skill to $copilotSkillDir"
+    }
+    else {
+        Write-Warn "/x1 skill source not found at $skillSrcDir (skipping skill install)."
+    }
+
+    # Copilot has no analogue of Claude Code's permissions.allow, so there is nothing here to
+    # pre-approve: its saved approvals live in permissions-config.json, which is auto-managed AND
+    # keyed by absolute project path, meaning there is no machine-wide slot an installer could
+    # seed. Stated rather than left to be discovered as "why does Copilot keep prompting when
+    # Claude Code doesn't".
+    Write-Info "Copilot prompts on first use of each tool - pick its 'always allow' option, or start"
+    Write-Info "  it with --allow-tool 'x1-search(*)'. There is no global allowlist to pre-seed:"
+    Write-Info "  Copilot saves approvals per project directory, not per machine."
+
+    # --- Advisory: a skillDirectories entry left over from a manual "/skill add" ---
+    #
+    # Warned about, never rewritten - the same precedent as the Lean-migration warning about a
+    # customer x1mcp.config.json earlier in this script. skillDirectories is a user-owned array in
+    # a user-editable file, and an entry there may point at a skill tree the user maintains
+    # themselves. But if it also provides x1, Copilot now loads the same skill twice, and that
+    # duplicate is invisible until "/skills list" shows two.
+    if (Test-Path $copilotSettings) {
+        try {
+            $cs = Read-JsonConfig $copilotSettings
+            if ($cs.PSObject.Properties["skillDirectories"]) {
+                foreach ($dir in @($cs.skillDirectories)) {
+                    $d = [string]$dir
+                    if ($d -and (Test-Path (Join-Path $d "x1\SKILL.md"))) {
+                        Write-Warn "settings.json lists skillDirectories entry '$d', which also provides the x1 skill."
+                        Write-Warn "  Copilot would now load /x1 twice. Remove that entry from:"
+                        Write-Warn "    $copilotSettings"
+                        Write-Warn "  Left alone on purpose - this installer does not edit your settings array."
+                    }
+                }
+            }
+        }
+        catch {
+            Write-Info "Could not read $copilotSettings to check for duplicate skill directories: $($_.Exception.Message)"
+        }
+    }
+
+    # --- Advisory: the plugin route and this route both register x1-search ---
+    #
+    # The Copilot plugin ships its own x1-search server entry and its own copy of the skill, so a
+    # machine with both ends up with two registrations under one name. Both use --proxy, so the
+    # shared relay keeps the WCF invariant either way and nothing crashes - but the duplicate is
+    # confusing, and is exactly the kind of thing diagnosed weeks later. Mirrors the
+    # plugin-resident-daemon warning in the relay step above.
+    if (Test-Path $copilotAppConfig) {
+        try {
+            $cc = Read-JsonConfig $copilotAppConfig
+            if ($cc.PSObject.Properties["installedPlugins"]) {
+                $x1Plugins = @(@($cc.installedPlugins) | Where-Object {
+                    $_ -and $_.PSObject.Properties["name"] -and $_.name -eq "x1-search"
+                })
+                if ($x1Plugins.Count -gt 0) {
+                    Write-Warn "The x1-search Copilot PLUGIN is also installed. It registers its own x1-search"
+                    Write-Warn "  server and its own /x1 skill, so both are now present twice. Pick one route:"
+                    Write-Warn "  either 'copilot plugin uninstall x1-search', or re-run this installer with"
+                    Write-Warn "  -Target Desktop / -Target Code instead of All."
+                }
+            }
+        }
+        catch {
+            Write-Info "Could not read $copilotAppConfig to check for a conflicting plugin: $($_.Exception.Message)"
+        }
+    }
+
+    # --- Detection: informational only (see the block comment above for why it does not gate) ---
+    $copilotUninstallKey = "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\GitHub Copilot"
+    if ((Test-Path $copilotUninstallKey) -or (Test-Path $copilotCfgDir)) {
+        Write-Info "Covers the GitHub Copilot desktop app AND the Copilot CLI - they share this config."
+    }
+    else {
+        Write-Info "GitHub Copilot was not detected on this machine. The config has been written anyway,"
+        Write-Info "  so x1-search is already registered if Copilot is installed later."
+    }
+
+    # Licensing, stated here because the failure is remote and looks nothing like a connector
+    # fault: a free Copilot account is not entitled to the CLI/app agent surface, so the session
+    # dies during start-up - "not authorized to use this Copilot feature", or a 421 after a seat
+    # change - before x1-search is loaded at all. Without this line every such support conversation
+    # starts by investigating the bridge.
+    Write-Info "Requires a PAID Copilot license: Copilot Free cannot run the CLI/app agent surface,"
+    Write-Info "  and an org-provided seat also needs that org's Copilot CLI policy enabled."
+    Write-Info "  See docs/UserManual.md section 13 if a session fails before any x1 tool runs."
+
+    # No restart is offered here, unlike Claude Desktop. Copilot runs long-lived parallel agent
+    # sessions in their own git worktrees; killing it mid-session discards work that no config file
+    # can reconstruct. Advisory only, on purpose.
+    Write-Info "Restart GitHub Copilot to pick up the new server."
+}
+
+# ---------------------------------------------------------------------------
 # Step 7 — Check X1ServiceHost (advisory)
 # ---------------------------------------------------------------------------
 
@@ -1001,6 +1224,12 @@ if ($doCode) {
         Write-Host "  /x1 skill installed  : $skillDestDir"
     }
 }
+if ($doCopilot) {
+    Write-Host "  Copilot config       : $copilotCfgPath"
+    if (Test-Path $copilotSkillDir) {
+        Write-Host "  /x1 skill installed  : $copilotSkillDir"
+    }
+}
 Write-Host ""
 Write-Host "  Package flavor  : $flavorName"
 Write-Host "  MCP server name : x1-search"
@@ -1012,15 +1241,16 @@ if ($isFull) {
     Write-Host "  Shared relay    : $exePath --host ($relayUrl)"
     Write-Host "                    net4.8 in-bridge relay - no GraphQL API, no .NET 10 dependency."
 }
-if ($doCode -and (Test-Path $skillDestDir)) {
-    Write-Host "  Skill           : /x1  (run /x1 in Claude Code, or just ask to find/preview your content)"
+if (($doCode -and (Test-Path $skillDestDir)) -or ($doCopilot -and (Test-Path $copilotSkillDir))) {
+    Write-Host "  Skill           : /x1  (run /x1 in Claude Code or GitHub Copilot, or just ask to"
+    Write-Host "                    find/preview your content)"
 }
 Write-Host ""
 if ($isFull) {
-    Write-Host "  All Claude products proxy through the one shared relay above - see" -ForegroundColor Gray
+    Write-Host "  Every registered client proxies through the one shared relay above - see" -ForegroundColor Gray
     Write-Host "    scheduled task '$daemonTaskName' for its logon auto-start." -ForegroundColor Gray
 } else {
-    Write-Host "  All Claude products proxy through the one shared relay above. It starts on" -ForegroundColor Gray
+    Write-Host "  Every registered client proxies through the one shared relay above. It starts on" -ForegroundColor Gray
     Write-Host "    demand when a session first needs it; there is no scheduled task." -ForegroundColor Gray
 }
 Write-Host ""

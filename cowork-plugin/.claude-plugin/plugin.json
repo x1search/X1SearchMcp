@@ -1,6 +1,6 @@
 {
   "name": "x1-search",
-  "version": "1.0.34",
+  "version": "1.0.35",
   "description": "Search and preview your local X1 Search index from Claude — files, email and attachments, cloud files (OneDrive, GDrive, Dropbox, SharePoint), and chat (Teams, Slack). Bundles the x1-search connector and the /x1 skill that drives it efficiently.",
   "author": {
     "name": "X1 Discovery, Inc."

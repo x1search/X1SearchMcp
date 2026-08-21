@@ -311,8 +311,9 @@ namespace X1.McpBridge
         /// is only as accurate as whatever integration layer populated it - in the "local-agent-mode"
         /// plugin wiring this connector is often launched under, clientInfo reports a static
         /// placeholder tied to the plugin wrapper, not the real Claude Code build. Falls back to the
-        /// declared clientInfo when no local Claude/Claude Code process can be identified (e.g. some
-        /// other MCP client entirely), so this still degrades gracefully for non-Claude callers.
+        /// declared clientInfo when no local Claude/Claude Code/Copilot process can be identified
+        /// (e.g. some other MCP client entirely), so this still degrades gracefully for callers the
+        /// scanner does not know about.
         ///
         /// XS-1684: ReportClientInfo takes a single (name, version) pair, but more than one Claude
         /// client can be running at once (e.g. the desktop app and Claude Code both open - the two
@@ -697,16 +698,21 @@ namespace X1.McpBridge
                 info["scanError"] = ex.Message;
             }
 
-            // Which Claude application is actually driving this session, detected by inspecting
+            // Which agent application is actually driving this session, detected by inspecting
             // other processes on the machine rather than trusting the MCP clientInfo self-report
             // (see AgentProcessScanner's doc comment for why that's unreliable in practice).
+            //
+            // Key renamed from detectedClaudeProcesses when GitHub Copilot joined the scan: a key
+            // named "Claude" carrying a "GitHub Copilot" row is the kind of quiet wrongness that
+            // gets read straight past in a pasted support transcript. No alias is kept - nothing
+            // outside this connector reads it (verified across the workspace).
             try
             {
-                info["detectedClaudeProcesses"] = AgentProcessScanner.ScanClaudeProcesses();
+                info["detectedClientProcesses"] = AgentProcessScanner.ScanAgentProcesses();
             }
             catch (Exception ex)
             {
-                info["detectedClaudeProcessesError"] = ex.Message;
+                info["detectedClientProcessesError"] = ex.Message;
             }
 
             return info;
