@@ -242,7 +242,8 @@ powershell -ExecutionPolicy Bypass -File installer\install.ps1 -Uninstall -Targe
 `build-installer.bat` also produces `installer\copilot-plugin\`, a self-contained Copilot plugin carrying both the connector and the `/x1` skill. Use it **instead of** `-Target Copilot`, not as well: each registers a server named `x1-search`, so a machine with both sees the server and the skill twice (harmless — both run `--proxy` and share the one relay — but confusing). `install.ps1` warns when it finds the plugin installed.
 
 ```powershell
-copilot plugin install <package>\copilot-plugin
+# Must be an ABSOLUTE path. A relative one - with or without .\ - is rejected.
+copilot plugin install C:\X1SearchMcp\copilot-plugin
 ```
 
 The argument must be an **absolute path to the directory**. A relative path (`.\copilot-plugin`) is rejected as an invalid plugin spec, and so is the `x1-search-copilot.plugin` zip — Copilot reads an archive as a repository and reports `No plugin.json found in repository`, so unzip it first. Installing this way also enables the plugin, which matters: a plugin's MCP servers only start when it is enabled, so the `copilot --plugin-dir` alternative needs an `enabledPlugins` entry or its tools silently never appear.
