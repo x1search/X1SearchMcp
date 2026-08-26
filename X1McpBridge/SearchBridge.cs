@@ -166,8 +166,12 @@ namespace X1.McpBridge
                 }
                 catch (Exception ex)
                 {
-                    Log.Warn("SearchAsync (multi-table fan-out): table '" + table + "' failed: " + ex.Message);
-                    outcomes.Add(new TableSearchOutcome(table, null, ex.Message));
+                    // XS-1719: this catch is BELOW ProcessMessage's translation - a fan-out failure
+                    // becomes a per-table `error` string inside a successful result, so the raw WCF
+                    // text would reach the caller here even with that outer guard in place. Log the
+                    // full exception, hand the caller the same friendly line every other path uses.
+                    Log.Warn("SearchAsync (multi-table fan-out): table '" + table + "' failed", ex);
+                    outcomes.Add(new TableSearchOutcome(table, null, ServiceAvailability.DescribeForCaller(ex)));
                 }
             }
 
@@ -1205,7 +1209,7 @@ namespace X1.McpBridge
                 ? (Exception)new X1McpFilesOnlyLicenseException(table)
                 : new InvalidOperationException(
                     "X1 Search could not create a session for table '" + table + "' (returned " +
-                    sessionId + "). The X1 service may be unavailable - confirm X1ServiceHost is running and retry.");
+                    sessionId + "). " + BridgeConstants.ServiceUnavailable);
         }
 
         private void ReleaseCallbackSession(IX1MCPSearchManager ch, int sessionId)

@@ -55,6 +55,22 @@ namespace X1.McpBridge
             "an X1 Search license with MCP enabled. See " + McpLandingPageUrl + " for the requirements.";
 
         /// <summary>
+        /// XS-1719: the connector's single down-state message — shown whenever X1ServiceHost can't be
+        /// reached, in place of the raw WCF transport text. Lives here, next to the licensing messages,
+        /// for the same reason they do: it is reached from two independent paths that must not drift —
+        /// <see cref="SearchBridge.ThrowIfSessionCreationFailed"/> (service reachable, but it returned
+        /// the 0 "unavailable" session sentinel) and <see cref="ServiceAvailability.DescribeForCaller"/>
+        /// (service not reachable at all). Those are different failures at the wire level and identical
+        /// from where the caller sits, so they say the same thing.
+        ///
+        /// Phrased as the one action that actually resolves it. No landing-page URL: unlike the
+        /// licensing messages this is not a "you need to buy/enable something" state, and pointing a
+        /// stuck user at a marketing page instead of at "start the service" would be a small betrayal.
+        /// </summary>
+        public const string ServiceUnavailable =
+            "The X1 service may be unavailable - confirm X1ServiceHost is running and retry.";
+
+        /// <summary>
         /// XS-1673: one-time welcome banner shown on this connector's first-ever tool call, for a
         /// connection licensed for Files-only.
         /// </summary>
