@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.3",
   "name": "x1-search",
-  "version": "1.0.35",
+  "version": "1.0.36",
   "description": "Search and preview your own content from Claude — local files, Outlook/Exchange/Gmail email and attachments, cloud files (OneDrive, GDrive, Dropbox, SharePoint), and chat (Teams, Slack) — powered by your local X1 Search index.",
   "author": {
     "name": "X1 Discovery, Inc.",
