@@ -589,8 +589,11 @@ namespace X1.McpBridge
             }
             catch (Exception ex)
             {
+                // XS-1719: returned as a result payload, not thrown, so ProcessMessage's translation
+                // never sees it - x1_generate_preview needs its own. Log.Error above keeps the raw
+                // transport detail.
                 Log.Error("GeneratePreviewAsync failed for table=" + table + " uri=" + uri, ex);
-                return new JObject { ["error"] = ex.Message };
+                return new JObject { ["error"] = ServiceAvailability.DescribeForCaller(ex) };
             }
 
             // output=file: write the generated HTML to an artifact-ready fragment file and return its

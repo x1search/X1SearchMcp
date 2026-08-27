@@ -76,6 +76,7 @@
     <Compile Include="RelayProcessScanner.cs" />
     <Compile Include="SearchBridge.cs" />
     <Compile Include="SearchManagerCallbacks.cs" />
+    <Compile Include="ServiceAvailability.cs" />
     <Compile Include="TableSchemaResolver.cs" />
     <Compile Include="TempSweep.cs" />
     <Compile Include="X1ConcurrencyWorkaround.cs" />

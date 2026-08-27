@@ -85,6 +85,7 @@
     <Compile Include="ProxyModeTests.cs" />
     <Compile Include="RelayHealthTests.cs" />
     <Compile Include="SearchManagerCallbacksTests.cs" />
+    <Compile Include="ServiceAvailabilityTests.cs" />
     <Compile Include="TempSweepTests.cs" />
     <Compile Include="X1ServiceContractWireTests.cs" />
     <Compile Include="X1TimeoutScenariosTests.cs" />

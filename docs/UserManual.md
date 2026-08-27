@@ -1523,9 +1523,11 @@ Run this from a Command Prompt or PowerShell window to confirm the bridge can re
 
 ---
 
-### Tool call returns "error connecting to X1ServiceHost" or similar WCF error
+### Tool call returns "The X1 service may be unavailable"
 
-**Symptoms:** `x1_search` or other tools return an error about named pipes or WCF endpoints.
+**Symptoms:** `x1_search` or another tool returns *"The X1 service may be unavailable - confirm
+X1ServiceHost is running and retry."* On builds 1.0.0.35 and earlier this appeared instead as the
+underlying transport error — a message about named pipes, WCF endpoints, or a missing SOAP action.
 
 **Checks:**
 1. Open Task Manager and confirm `X1ServiceHost.exe` is running.

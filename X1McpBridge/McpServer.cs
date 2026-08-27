@@ -242,7 +242,12 @@ namespace X1.McpBridge
             catch (Exception ex)
             {
                 Log.Error("Error processing id=" + id + " method=" + method, ex);
-                return McpProtocol.Err(id, -32603, ex.Message, ex.ToString());
+                // XS-1719: the one place any tool/resource/prompt failure becomes a caller-visible
+                // error message, so it is where the raw WCF transport text gets demoted to the
+                // friendly down-state line. Only the `message` is substituted - `data` still carries
+                // ex.ToString() (inner exceptions and all), and the Log.Error above is untouched, so
+                // nothing is lost for diagnosis. Non-transport errors keep their own message verbatim.
+                return McpProtocol.Err(id, -32603, ServiceAvailability.DescribeForCaller(ex), ex.ToString());
             }
         }
 
@@ -1141,7 +1146,10 @@ namespace X1.McpBridge
             }
             catch (Exception ex)
             {
-                status = "error: " + ex.Message;
+                // XS-1719: reported as the resource's own payload rather than thrown, so this sits
+                // below ProcessMessage's translation and needs its own.
+                Log.Warn("ReadResource: ConnectAndGetHostStatus failed: " + ex);
+                status = "error: " + ServiceAvailability.DescribeForCaller(ex);
             }
 
             var body = new JObject
