@@ -75,7 +75,7 @@ Prints JSON with `totalResults` or an `error` field.
 | `x1_list_actions` | Post Search Actions for a `table`+`uri` (usually redundant — see the inline `actions`). |
 | `x1_execute_action` | Run an action: `get_path`, `open`, `show_in_folder`, `get_url`, `open_url`. |
 | `x1_get_metadata` | `GetItemInternal` field values for one `table` + `uri`. |
-| `x1_get_content` | Text/preview/fields for an indexed item via `mode` (`auto`/`content`/`preview`/`internal`). `content` uses XS-1575 `GetContent` — works for every table and hits the content store on repeat. `extract` accepted as a back-compat alias. |
+| `x1_get_content` | Text/preview/fields for an indexed item via `mode` (`auto`/`content`/`preview`/`internal`). `content` uses XS-1575 `GetContent` — works for every table and hits the content store on repeat. `extract` accepted as a back-compat alias. XS-1746: an item with no indexed text returns `{ error, reason, state }` naming the cause (read from the item's `istatus`) and the fix, instead of a generic failure — see `ContentUnavailable.cs`. |
 | `x1_extract_file` | XS-1575 `ExtractTextFromFile`: extract text from an arbitrary LOCAL file (not required to be indexed). Useful for preview caches and downloads. |
 | `x1_add_tags` / `x1_remove_tags` / `x1_clear_tags` | XS-1577 tagging: positional `uris[i] ↔ tags[i]` for add/remove; clear removes all tags. |
 | `x1_generate_preview` | Self-contained HTML preview (`maxChars`, `previewType`) to render as a Claude artifact/widget. |

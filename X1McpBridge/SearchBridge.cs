@@ -1,4 +1,4 @@
-// Copyright (c) 2026 X1 Discovery, Inc.
+﻿// Copyright (c) 2026 X1 Discovery, Inc.
 //
 // Licensed under the MIT License (copyright only). See the LICENSE file in
 // the repository root for the full license text.
@@ -919,8 +919,15 @@ namespace X1.McpBridge
             if (m == "content")
             {
                 var contentResult = await GetContentTextAsync(ch, table, uri, timeoutMs).ConfigureAwait(false);
-                if (contentResult != null) return contentResult;
-                return new JObject { ["error"] = "Content extraction failed or timed out.", ["mode"] = "content" };
+                if (contentResult.Payload != null) return contentResult.Payload;
+
+                // XS-1746: say WHY there is no text, and how to fix it. The item's own index fields carry
+                // the service's verdict, but they are only worth fetching when the service actually told us
+                // "no text" — after a timeout or a server error they would say nothing we could act on.
+                string[] rows = ContentUnavailable.WantsIndexFields(contentResult.State)
+                    ? TryGetItemInternal(ch, table, uri)
+                    : null;
+                return ContentUnavailable.Describe("content", contentResult.State, timeoutMs, uri, rows);
             }
 
             if (m == "auto")
@@ -928,7 +935,7 @@ namespace X1.McpBridge
                 // 1. GetContent — the fastest path when the content store is populated,
                 //    and the only mode that returns real text for emails and cloud files.
                 var contentResult = await GetContentTextAsync(ch, table, uri, timeoutMs).ConfigureAwait(false);
-                if (contentResult != null) return contentResult;
+                if (contentResult.Payload != null) return contentResult.Payload;
 
                 // 2. Preview — HTML for docx, mail-card for MSMail, image embed / extracted text for files.
                 int autoPreviewTimeoutMs = BridgeConfig.GetAutoPreviewTimeoutMs();
@@ -945,11 +952,18 @@ namespace X1.McpBridge
                     };
 
                 // 3. Raw index fields — always available.
+                //
+                // XS-1746: the fields fetched here are also what diagnoses step 1's failure, so the note
+                // now names the real reason instead of restating that nothing worked. The shape is
+                // deliberately unchanged — mode stays "internal" and rows stay populated, because
+                // ActionBridge.GenerateFilePreviewAsync consumes this response and branches on mode.
                 var rows = ch.GetItemInternal(table, uri);
+                var diagnosis = ContentUnavailable.Diagnose(contentResult.State, timeoutMs, uri, rows);
                 return new JObject
                 {
                     ["mode"] = "internal",
-                    ["note"] = "Content and preview not available for this item; returning raw index fields.",
+                    ["note"] = diagnosis.Message + " Returning the raw index fields instead.",
+                    ["reason"] = diagnosis.Reason,
                     ["rows"] = rows == null ? new JArray() : JArray.FromObject(rows)
                 };
             }
@@ -967,9 +981,14 @@ namespace X1.McpBridge
         /// XS-1575: <c>IX1MCPSearchManager.GetContent</c> — pulls extracted text for any indexed item
         /// (Files, MSMail, Gmail, Exchange, OneDrive, SP365, Teams, …) using the content store
         /// when populated. First call for an item back-fills the store; subsequent calls are effectively free.
-        /// Returns null on failure or timeout so the caller can decide how to report it.
+        ///
+        /// XS-1746: returns the raw callback <c>state</c> alongside the payload instead of a bare null on
+        /// failure. That state is the only thing distinguishing "the service says there is no text"
+        /// ("No text extracted") from "the service reported a problem" ("Error: Item not found: …") from
+        /// "the callback never arrived", and this method used to swallow it — leaving every caller to
+        /// report all three identically. <c>Payload</c> is null on failure; <c>State</c> is always set.
         /// </summary>
-        private async Task<JObject> GetContentTextAsync(IX1MCPSearchManager ch, string table, string uri, int timeoutMs)
+        private async Task<(JObject Payload, string State)> GetContentTextAsync(IX1MCPSearchManager ch, string table, string uri, int timeoutMs)
         {
             // As of X1 service 11.0.3.33, GetContent writes the extracted content to outputFile
             // and OnContentReady returns that path — read the file rather than the callback string.
@@ -981,13 +1000,22 @@ namespace X1.McpBridge
                 ch.GetContent(table, uri, outputFile);
                 var result = await _callbacks.WaitContentAsync(tcs, timeoutMs).ConfigureAwait(false);
                 _callbacks.CancelContentWait(outputFile);
+                string state = result.State ?? "";
 
                 if (!result.Success || string.IsNullOrEmpty(result.OutputFile) || !File.Exists(result.OutputFile))
-                    return null;
+                    return (null, state);
 
                 try
                 {
                     string text = File.ReadAllText(result.OutputFile, Encoding.UTF8);
+
+                    // XS-1746: the service only reports "No text extracted" for content it saw as empty
+                    // before writing the file. A file that is written but holds nothing but whitespace is
+                    // the same outcome to the caller, and returning `text: ""` would be the old dead end in
+                    // a different shape — so it takes the no-content path too.
+                    if (string.IsNullOrWhiteSpace(text))
+                        return (null, string.IsNullOrEmpty(state) ? ContentUnavailable.NoTextExtractedState : state);
+
                     bool truncated = false;
                     if (text.Length > 512 * 1024)
                     {
@@ -998,11 +1026,11 @@ namespace X1.McpBridge
                     {
                         ["mode"] = "content",
                         ["text"] = text,
-                        ["state"] = result.State ?? "",
-                        ["cached"] = (result.State ?? "").IndexOf("from index", StringComparison.OrdinalIgnoreCase) >= 0
+                        ["state"] = state,
+                        ["cached"] = state.IndexOf("from index", StringComparison.OrdinalIgnoreCase) >= 0
                     };
                     if (truncated) payload["truncated"] = true;
-                    return payload;
+                    return (payload, state);
                 }
                 finally
                 {
@@ -1010,6 +1038,22 @@ namespace X1.McpBridge
                 }
             }
             finally { ReleaseCallbackSession(ch, sessionId); }
+        }
+
+        /// <summary>
+        /// XS-1746: the item's raw index fields, for diagnosing why it has no text — <c>istatus</c> carries
+        /// the service's own verdict (see <see cref="ContentUnavailable"/>). Called only on the no-text path,
+        /// so it costs nothing in the normal case, and never throws: this runs while we are already building
+        /// an error, and a failure to explain that error must not replace it with a worse one.
+        /// </summary>
+        private static string[] TryGetItemInternal(IX1MCPSearchManager ch, string table, string uri)
+        {
+            try { return ch.GetItemInternal(table, uri); }
+            catch (Exception ex)
+            {
+                Log.Debug("TryGetItemInternal failed for " + table + "/" + uri + ": " + ex.Message);
+                return null;
+            }
         }
 
         /// <summary>

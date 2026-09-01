@@ -70,6 +70,111 @@ namespace X1.McpBridge
         public const string ServiceUnavailable =
             "The X1 service may be unavailable - confirm X1ServiceHost is running and retry.";
 
+        // ── XS-1746: "there is no text to return, and here is why" ──────────────
+        //
+        // Lives here for the reason the licensing messages do: reached from more than one path
+        // (x1_get_content mode="content" and the terminal fallback of mode="auto"), and one place for a
+        // test to assert that every allow-list-family variant carries the reindex call-out. No landing-page
+        // URL - unlike the licensing messages this is not "you need to buy something", it is "do this thing
+        // in the product", and the product is already installed.
+
+        /// <summary>
+        /// The one action that resolves the allow-list and metadata-only cases. "Global Allowlist Settings"
+        /// is the verbatim button label in the shipping UI (X1UI2\X1.OneDrivePlugin\View\FoldersSelectionView.xaml,
+        /// X1UI2\X1.OutlookPlugin\View\OutlookConfigView.xaml) - not a paraphrase, so a user can find it.
+        ///
+        /// The reindex call-out is not a footnote: allow-list changes apply at index time, so ticking the
+        /// box and retrying immediately looks exactly like the fix not working.
+        /// </summary>
+        public const string ContentAllowListGuidance =
+            "To enable it: in X1 Search open the data source's settings (gear icon) -> Global Allowlist " +
+            "Settings, tick the file type(s) you want indexed, then let the collection reindex. The change " +
+            "applies only to items indexed after it, so a reindex is required.";
+
+        /// <summary>
+        /// Suggested next step wherever a separate, on-demand extraction path might still succeed. Phrased
+        /// as "may" on purpose: x1_extract_file calls ExtractTextFromFile rather than the content store, so
+        /// it genuinely can succeed where index-time extraction did not - but it is not guaranteed to, and
+        /// promising a fix that then fails is worse than not suggesting it.
+        /// </summary>
+        private const string TryExtractFile =
+            "x1_extract_file on the item's local path uses a separate on-demand extraction path and may " +
+            "return text where the index did not.";
+
+        /// <summary>
+        /// Last-resort text for a failure with no state at all to classify. Kept close to the string the
+        /// connector returned for every failure before XS-1746, so an old report is still recognisable.
+        /// </summary>
+        public const string ContentExtractionFailed =
+            "Content extraction failed. " + TryExtractFile;
+
+        /// <summary>
+        /// The callback never arrived. Deliberately says nothing about content indexing: a timeout means we
+        /// learned nothing about the item, and guessing "your file type isn't allow-listed" here is exactly
+        /// the conflation XS-1746 exists to end.
+        /// </summary>
+        public static string ContentExtractionTimedOut(int timeoutMs) =>
+            "Content extraction timed out after " + timeoutMs + "ms - this says nothing about whether the " +
+            "item has text. Large PDFs and containers can exceed the budget: retry with a larger timeoutMs, " +
+            "or " + TryExtractFile;
+
+        /// <summary>
+        /// The message for an item X1 indexed but has no text for. <paramref name="reason"/> is one of
+        /// <see cref="ContentUnavailable"/>'s slugs; <paramref name="extension"/> is the item's file type
+        /// (".dwg") when one could be determined, else null.
+        ///
+        /// Each reason gets only the guidance that actually applies to it. A password-protected PDF and an
+        /// over-size container are not fixed by editing the allow-list, and sending their reader there would
+        /// just be the old dead end with more words.
+        /// </summary>
+        public static string ContentNotIndexed(string reason, string extension)
+        {
+            string type = string.IsNullOrEmpty(extension) ? "this file type" : extension + " files";
+
+            switch (reason)
+            {
+                case ContentUnavailable.ReasonNotAllowListed:
+                    return "X1 indexed this item's metadata but not its text: " + type + " are not selected " +
+                           "for content indexing in X1's global allow-list. " + ContentAllowListGuidance;
+
+                case ContentUnavailable.ReasonFolderMetaOnly:
+                    return "X1 indexed this item's metadata but not its text: the folder it lives in is set " +
+                           "to index names and attributes only, not content. To enable it: in X1 Search open " +
+                           "the data source's settings (gear icon), set that folder to index content, then " +
+                           "let the collection reindex. The change applies only to items indexed after it, " +
+                           "so a reindex is required.";
+
+                case ContentUnavailable.ReasonTooLarge:
+                    return "X1 has no indexed text for this item: it exceeded X1's content-size limit when " +
+                           "it was indexed. " + TryExtractFile;
+
+                case ContentUnavailable.ReasonEncrypted:
+                    return "X1 could not extract text from this item: it is password-protected or encrypted. " +
+                           "There is no connector-side workaround - the item has to be decrypted before X1 " +
+                           "can index its text.";
+
+                case ContentUnavailable.ReasonNoContent:
+                    return "This item has no extractable text - X1 indexed it and found none. Nothing is " +
+                           "misconfigured; there is simply no body text to return.";
+
+                case ContentUnavailable.ReasonPending:
+                    return "X1 has no indexed text for this item yet: its container is still being indexed. " +
+                           "Retry once indexing finishes, or " + TryExtractFile;
+
+                case ContentUnavailable.ReasonExtractionFailed:
+                    return "X1 failed to extract text from this item when it was indexed. " + TryExtractFile;
+
+                default:
+                    // The reason could not be narrowed - typically because the item carries no istatus (not
+                    // every schema does) or the installed service reports one this build doesn't know. Give
+                    // the full list rather than picking one and being confidently wrong.
+                    return "X1 has no indexed text for this item, so there is nothing to return. The likely " +
+                           "causes are: " + type + " are not in X1's content allow-list; the folder is " +
+                           "indexed for metadata only; the item exceeded X1's content-size limit; or it " +
+                           "genuinely has no text. " + ContentAllowListGuidance;
+            }
+        }
+
         /// <summary>
         /// XS-1673: one-time welcome banner shown on this connector's first-ever tool call, for a
         /// connection licensed for Files-only.

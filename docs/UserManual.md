@@ -1553,6 +1553,40 @@ X1ServiceHost, a user-account mismatch, or an endpoint that was never reachable 
 
 ---
 
+### The agent says a file has no text to read
+
+**Symptoms:** `x1_get_content` returns an `error` explaining that X1 has no indexed text for the
+item, rather than the document's contents. On builds 1.0.0.36 and earlier this appeared instead as
+the flat *"Content extraction failed or timed out."* — which named no cause and no fix, and read
+the same whether the file type was never content-indexed or the call genuinely timed out.
+
+This is usually **not** a fault. X1 can index an item's metadata (name, path, dates, size) without
+indexing its *content*; when it does, there is no body text for the connector to hand back. The
+response now carries a `reason` field naming which case you are in:
+
+| `reason` | Cause | Fix |
+|---|---|---|
+| `file_type_not_content_indexed` | The file type is not selected in X1's global content allow-list | See below |
+| `folder_metadata_only` | That folder is set to index names and attributes only | Set the folder to index content in the data source's settings, then reindex |
+| `content_size_limit` | The item exceeded X1's content-size limit when indexed | No setting to change — try `x1_extract_file` on the local path |
+| `password_protected` | The item is encrypted or password-protected | Decrypt it, then reindex |
+| `no_content` | The item genuinely has no body text | Nothing to fix |
+| `extraction_failed` | Extraction failed when the item was indexed | Try `x1_extract_file`; check the X1 log for that item |
+| `indexing_pending` | The item's container is still being indexed | Retry once indexing finishes |
+| `not_content_indexed` | The reason could not be narrowed — the item carries no indexing status | Work through the causes above |
+| `timed_out` | The call timed out; nothing was learned about the item | Retry with a larger `timeoutMs` |
+| `server_error` | X1 reported a different problem (e.g. `Item not found`) | Address the reported problem |
+
+**To content-index a file type:**
+1. In X1 Search, open the data source's settings (gear icon).
+2. Click **Global Allowlist Settings**.
+3. Tick the file type(s) you want indexed.
+4. **Reindex the collection.** The allow-list applies at index time, so existing items keep their
+   current state until they are reindexed — this step is not optional, and skipping it looks
+   exactly like the change not working.
+
+---
+
 ### x1_search returns 0 results unexpectedly
 
 **Symptoms:** Search returns `{"totalResults":0,"returned":0,"results":[]}`.

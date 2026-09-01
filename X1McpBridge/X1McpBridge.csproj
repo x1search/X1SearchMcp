@@ -61,6 +61,7 @@
     <Compile Include="BridgeConfig.cs" />
     <Compile Include="BridgeConstants.cs" />
     <Compile Include="ColumnNameResolver.cs" />
+    <Compile Include="ContentUnavailable.cs" />
     <Compile Include="DataSourceInfoMapper.cs" />
     <Compile Include="FilterMapper.cs" />
     <Compile Include="FirstUseTracker.cs" />
