@@ -382,10 +382,8 @@ problems:
   store on repeat calls.
 - The user gave you a **raw local file path directly** (typed in chat, or from a source outside
   X1 search — a download, a cached preview path, an arbitrary folder) and you have **not**
-  confirmed it's indexed → go straight to `x1_extract_file`. Don't try `x1_get_content` first
-  and wait for it to fail — a path that isn't indexed returns a generic
-  `"Content extraction failed or timed out"` error from `x1_get_content` that doesn't distinguish
-  "not indexed" from "actually timed out," so there's nothing to learn from trying it first.
+  confirmed it's indexed → go straight to `x1_extract_file`. A path that isn't in the index gets
+  you `Item not found` from `x1_get_content`, which is a wasted round trip, not a diagnosis.
 - **Uncertain whether a path is indexed?** Run a quick `x1_search` with a `path:` filter for the
   file's folder first — if it comes back with a hit, use that result's `uri` with
   `x1_get_content`; if it comes back empty, use `x1_extract_file` directly on the raw path.
@@ -400,7 +398,7 @@ problems:
 
 | Mode | What it returns | When to use |
 |------|----------------|-------------|
-| `"content"` | `{ text, state, cached }` — full plain extracted text of the item | **Preferred** when you need to read, summarise, quote, or reason over the document body |
+| `"content"` | `{ text, state, cached }` — full plain extracted text of the item, or `{ error, reason, state }` explaining why there is none (see below) | **Preferred** when you need to read, summarise, quote, or reason over the document body |
 | `"auto"` | Falls back to `"content"` if available; otherwise tries `"preview"` | Use when you're unsure whether content extraction is available; slightly slower |
 | `"preview"` | `{ preview }` — local file path only (no text) | Fallback: get a cached local path for `extract-office-text.ps1` when `"content"` mode is empty/errors/times out on a `.pptx`/`.xlsx` |
 | `"internal"` | Raw X1 index metadata (dates, size, PII flags, extraction info) | Diagnostics / showing metadata to the user; not document content |
@@ -419,6 +417,27 @@ of token savings in `x1_cost_savings` reports.
 extraction even when indexed. If `x1_get_content` times out or errors on an item you know is
 indexed, try `x1_extract_file` on the same underlying local path as a fallback — it calls a
 different extraction path and may succeed where the content-store path didn't.
+
+**When there's no text to return (XS-1746):** an indexed item can have no indexed *content* —
+X1 stores its metadata but never extracted its body. `x1_get_content` tells you which case you
+are in rather than failing vaguely; it returns `{ error, reason, state }`, where `reason` is one
+of:
+
+| `reason` | What it means | What to tell the user |
+|---|---|---|
+| `file_type_not_content_indexed` | The file type isn't in X1's global content allow-list | Data source settings (gear) → **Global Allowlist Settings** → tick the type → **reindex** |
+| `folder_metadata_only` | That folder is set to index names/attributes only | Set the folder to index content in the data source's settings, then **reindex** |
+| `content_size_limit` | Exceeded X1's content-size limit at index time | Try `x1_extract_file` on the local path |
+| `password_protected` | Encrypted or password-protected | Nothing to configure; it must be decrypted first |
+| `no_content` | Genuinely has no body text | Nothing is wrong — say so and move on |
+| `extraction_failed` / `indexing_pending` | Extraction failed, or the container is still indexing | Retry later, or `x1_extract_file` |
+| `not_content_indexed` | Reason couldn't be narrowed (item carries no `istatus`) | Relay the message's list of likely causes |
+| `timed_out` | The call timed out — says **nothing** about indexing | Retry with a larger `timeoutMs`, or `x1_extract_file` |
+| `server_error` | X1 reported a different problem (e.g. `Item not found`) | Relay it; don't reach for the allow-list |
+
+**Relay the explanation instead of retrying.** A different `mode` will not produce text the index
+does not have, and re-running the same call burns tokens to reprint the same message. The one
+exception is `timed_out`, which is the only `reason` where retrying is meaningful.
 
 #### `x1_extract_file` — works whether or not the file is indexed
 

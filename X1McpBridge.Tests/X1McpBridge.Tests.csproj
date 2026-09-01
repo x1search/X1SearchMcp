@@ -61,6 +61,7 @@
     <Compile Include="DataSourceInfoMapperTests.cs" />
     <Compile Include="BridgeLoggerTests.cs" />
     <Compile Include="ColumnNameResolverTests.cs" />
+    <Compile Include="ContentUnavailableTests.cs" />
     <Compile Include="ExceptionPropagationTests.cs" />
     <Compile Include="FakeX1Service.cs" />
     <Compile Include="FilterMapperTests.cs" />

@@ -48,7 +48,12 @@ namespace X1.McpBridge.Tests
         public void ResultChangesOutdated(int sessionID, int uiSequence, int serviceSequence) { }
         public void DestroySearchSession(int sessionID) { }
         public void CancelPreview(string uri, string additionalData = null) { }
-        public string[] GetItemInternal(string table, string uri) => new string[0];
+        // XS-1746: settable so a test can hand back a realistic flat field array (in particular an
+        // "istatus" pair), which is what the connector reads to explain why an item has no text. The
+        // default keeps the previous "returns nothing" behavior every existing test relies on.
+        public Func<string, string, string[]> GetItemInternalResult = (table, uri) => new string[0];
+
+        public string[] GetItemInternal(string table, string uri) => GetItemInternalResult(table, uri);
         public void Serialize(string table, string uri, string fileName) { }
         public void ExtractTextFromFile(string file, string outputFile) { }
         public void ExportHtmlFromFile(string file, string outputFile) { }
