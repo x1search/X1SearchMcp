@@ -13,8 +13,20 @@ REM ---------------------------------------------------------------------------
 REM build-installer.bat
 REM Builds X1McpBridge in Release, then stages a distributable installer package.
 REM
-REM Usage: build-installer.bat [Release^|Debug] [--lean^|--full]
+REM Usage: build-installer.bat [Release^|Debug] [--lean^|--full] [--stage-only^|--package-only]
 REM Output: installer\ folder next to this script
+REM
+REM PHASES
+REM   With no phase flag the script builds, stages and packages in one go (the developer default).
+REM   A CI pipeline that code-signs the staged binaries (XS-1765) splits the run in two, so the
+REM   signing step can sit between staging and packaging:
+REM     --stage-only    restore, build, publish (Full), stage installer\, run the Lean assertion,
+REM                     then stop. Nothing is packed.
+REM     --package-only  pack the already-staged installer\ into x1-search.plugin, the Copilot plugin
+REM                     and x1-search.mcpb. Never rebuilds or restages, because either would
+REM                     overwrite binaries signed after --stage-only.
+REM   Set X1MCP_REQUIRE_MCPB=1 to make a missing 'mcpb' CLI fail the build instead of skipping the
+REM   .mcpb, so an installer that embeds x1-search.mcpb can't silently ship without it.
 REM
 REM FLAVORS
 REM   Lean (DEFAULT, what customers get)
@@ -62,6 +74,15 @@ REM Exported so build-plugin.ps1 / check-plugin-staleness.ps1 inherit it; contai
 REM above, so it does not leak back into the caller's shell.
 set X1MCP_FLAVOR=%FLAVOR%
 
+set PHASE=All
+for %%A in (%*) do (
+  if /i "%%~A"=="--stage-only"   set PHASE=StageOnly
+  if /i "%%~A"=="--package-only" set PHASE=PackageOnly
+)
+
+set SCRIPT_DIR=%~dp0
+set STAGE=%SCRIPT_DIR%installer
+
 echo.
 echo  ===================================================
 echo   X1 Search MCP Bridge - Build Installer
@@ -69,8 +90,11 @@ echo   Configuration: %CONFIG%
 echo   Flavor:        %FLAVOR%
 if /i "%FLAVOR%"=="Lean" echo                  ^(no GraphQL API, no .NET 10 dependency^)
 if /i "%FLAVOR%"=="Full" echo                  ^(GraphQL API + Nitro, bundles the net10 daemon^)
+echo   Phase:         %PHASE%
 echo  ===================================================
 echo.
+
+if /i "%PHASE%"=="PackageOnly" goto :package
 
 REM ---------------------------------------------------------------------------
 REM Locate MSBuild  (VS 2025 / VS 2022 / VS 2019 full installs + BuildTools)
@@ -111,7 +135,6 @@ REM ---------------------------------------------------------------------------
 REM Restore NuGet packages
 REM ---------------------------------------------------------------------------
 
-set SCRIPT_DIR=%~dp0
 set SLN=%SCRIPT_DIR%X1Mcp.sln
 set NUGET=%SCRIPT_DIR%nuget.exe
 
@@ -203,7 +226,6 @@ REM Stage installer package
 REM ---------------------------------------------------------------------------
 
 set BUILD_OUT=%SCRIPT_DIR%X1McpBridge\bin\%CONFIG%
-set STAGE=%SCRIPT_DIR%installer
 
 echo.
 echo  Staging installer to: %STAGE%
@@ -327,9 +349,31 @@ echo  Lean package verified: net4.8 only, no .NET 10 dependency.
 
 :skip_lean_assert
 
+if /i "%PHASE%"=="StageOnly" (
+  echo.
+  echo  Staged to %STAGE% ^(--stage-only: nothing packed^).
+  echo  Sign the staged binaries now, then run: build-installer.bat %CONFIG% --%FLAVOR% --package-only
+  endlocal
+  exit /b 0
+)
+
+:package
+
+REM --package-only lands here straight after the banner, so nothing above has checked that there is
+REM anything to pack. Every packager below copies out of installer\.
+if not exist "%STAGE%\X1McpBridge.exe" (
+  echo  ERROR: %STAGE%\X1McpBridge.exe not found - nothing to package.
+  echo  Run build-installer.bat --stage-only ^(or with no phase flag^) first.
+  exit /b 1
+)
+
 REM Build the Cowork plugin (connector + /x1 skill) -> installer\x1-search.plugin
 if exist "%SCRIPT_DIR%cowork-plugin\.claude-plugin\plugin.json" (
   powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%build-plugin.ps1" -Flavor %FLAVOR%
+  if errorlevel 1 (
+    echo  ERROR: Cowork plugin build failed.
+    exit /b 1
+  )
 ) else (
   echo  NOTE: cowork-plugin not found; skipping Cowork plugin build.
 )
@@ -337,19 +381,32 @@ if exist "%SCRIPT_DIR%cowork-plugin\.claude-plugin\plugin.json" (
 REM Build the GitHub Copilot plugin -> installer\copilot-plugin\ + installer\x1-search-copilot.plugin
 if exist "%SCRIPT_DIR%copilot-plugin\.claude-plugin\plugin.json" (
   powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%build-copilot-plugin.ps1" -Flavor %FLAVOR%
+  if errorlevel 1 (
+    echo  ERROR: GitHub Copilot plugin build failed.
+    exit /b 1
+  )
 ) else (
   echo  NOTE: copilot-plugin not found; skipping GitHub Copilot plugin build.
 )
 
 REM Build the MCPB desktop extension -> installer\x1-search.mcpb (Lean payload always, regardless
 REM of %FLAVOR% - see build-mcpb.ps1 header for why). Soft-skipped if the mcpb CLI isn't installed,
-REM since a missing dev-machine tool must not block the Cowork plugin / installer build.
+REM since a missing dev-machine tool must not block the Cowork plugin / installer build - unless
+REM X1MCP_REQUIRE_MCPB=1, which CI sets because the X1 Search installer embeds the .mcpb.
 if exist "%SCRIPT_DIR%mcpb-package\manifest.json" (
   where mcpb >nul 2>nul
   if errorlevel 1 (
+    if "%X1MCP_REQUIRE_MCPB%"=="1" (
+      echo  ERROR: 'mcpb' CLI not found on PATH and X1MCP_REQUIRE_MCPB=1 ^(npm install -g @anthropic-ai/mcpb^).
+      exit /b 1
+    )
     echo  NOTE: 'mcpb' CLI not found on PATH ^(npm install -g @anthropic-ai/mcpb^); skipping .mcpb build.
   ) else (
     powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%build-mcpb.ps1"
+    if errorlevel 1 (
+      echo  ERROR: MCPB build failed.
+      exit /b 1
+    )
   )
 ) else (
   echo  NOTE: mcpb-package not found; skipping MCPB build.
