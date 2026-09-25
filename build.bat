@@ -7,4 +7,6 @@
 :: patent rights. See the PATENTS file in the repository root.
 
 
-"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\MSBuild\Current\bin\MSBuild.exe" X1Mcp.sln /p:Configuration=Release
+:: -restore with RestorePackagesConfig pulls packages.config dependencies
+:: (log4net, Newtonsoft.Json) into packages\ before building.
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\MSBuild\Current\bin\MSBuild.exe" X1Mcp.sln -restore /p:RestorePackagesConfig=true /p:Configuration=Release
