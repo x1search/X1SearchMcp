@@ -185,6 +185,14 @@ namespace X1.McpBridge
             var relayUrl = BridgeConfig.GetDaemonUrl();
             Log.Info("X1 MCP Bridge starting (host transport -> " + relayUrl + ")");
 
+            // XS-1819: who started this relay and under what containment is the first question when
+            // one misbehaves only when launched by a client, so record it up front.
+            Log.Info("Relay process: pid " + Process.GetCurrentProcess().Id +
+                     ", parent pid " + RelayLauncher.GetParentProcessId() +
+                     ", session " + Process.GetCurrentProcess().SessionId +
+                     (RelayLauncher.IsCurrentProcessInJob() ? ", inside a job object" : ", not in a job object") +
+                     ", exe " + SafeProcessPath() + ".");
+
             // ORDER BELOW IS LOAD-BEARING: claim singleness, then claim the port, and only then
             // open the WCF connection. Opening WCF first would mean N racing hosts each briefly
             // holding a second connection to X1ServiceHost - the exact crash this relay exists to
@@ -194,7 +202,13 @@ namespace X1.McpBridge
             {
                 // Quiet, not an error: losing this race is the normal outcome when several sessions
                 // start at once, and the winner is already serving.
-                Log.Info("Another X1 MCP relay is already running for this user session; exiting.");
+                var holders = RelayLauncher.FindHostProcesses().FindAll(
+                    h => h.Pid != Process.GetCurrentProcess().Id && h.SessionId == Process.GetCurrentProcess().SessionId);
+                Log.Info("Another X1 MCP relay is already running for this user session" +
+                         (holders.Count > 0
+                             ? " (pid " + string.Join(", ", holders.ConvertAll(h => h.Pid.ToString()).ToArray()) + ")"
+                             : "") +
+                         "; exiting.");
                 return 0;
             }
 
