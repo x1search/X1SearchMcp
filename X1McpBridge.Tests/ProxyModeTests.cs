@@ -200,9 +200,10 @@ namespace X1.McpBridge.Tests
         }
 
         [Test]
-        public void Forward_StalledReply_TimesOutInsteadOfHanging()
+        public void Forward_NoReplyAtAll_TimesOutAtTheNonToolCap()
         {
-            // Accepts, never answers. A non-tool request must give up at its 30s cap, not 120s.
+            // Accepts, never answers. A non-tool request must give up at its 10s cap, not 120s, and
+            // say it timed out - Run() relies on TimeoutException to skip a second full wait.
             var listener = new TcpListener(IPAddress.Loopback, 0);
             listener.Start();
             int port = ((IPEndPoint)listener.LocalEndpoint).Port;
@@ -212,10 +213,52 @@ namespace X1.McpBridge.Tests
                 {
                     var request = JObject.Parse("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}");
                     var sw = System.Diagnostics.Stopwatch.StartNew();
-                    Assert.Catch<Exception>(() =>
+                    var ex = Assert.Throws<TimeoutException>(() =>
                         ProxyMode.ForwardAsync(http, "http://127.0.0.1:" + port, request, null).GetAwaiter().GetResult());
-                    Assert.That(sw.Elapsed, Is.LessThan(TimeSpan.FromSeconds(40)));
-                    Assert.That(sw.Elapsed, Is.GreaterThan(TimeSpan.FromSeconds(25)));
+                    Assert.That(ex.Message, Does.Contain("no response headers arrived"));
+                    Assert.That(sw.Elapsed, Is.GreaterThan(TimeSpan.FromSeconds(8)));
+                    Assert.That(sw.Elapsed, Is.LessThan(TimeSpan.FromSeconds(14)));
+                }
+            }
+            finally
+            {
+                listener.Stop();
+            }
+        }
+
+        [Test]
+        public void Forward_HeadersThenStalledBody_TimesOutSayingTheBodyNeverCame()
+        {
+            // The variant the XS-1819 repro found taking 61s: headers arrive, the body never does.
+            var listener = new TcpListener(IPAddress.Loopback, 0);
+            listener.Start();
+            int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            Task.Run(() =>
+            {
+                try
+                {
+                    var client = listener.AcceptTcpClient();
+                    var stream = client.GetStream();
+                    ReadRequest(stream);
+                    var head = Encoding.ASCII.GetBytes(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 200\r\n\r\n");
+                    stream.Write(head, 0, head.Length);
+                    stream.Flush();
+                    Thread.Sleep(TimeSpan.FromSeconds(30));   // hold the connection open, send nothing
+                    client.Close();
+                }
+                catch { /* test over */ }
+            });
+            try
+            {
+                using (var http = NewClient())
+                {
+                    var request = JObject.Parse("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\"}");
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
+                    var ex = Assert.Throws<TimeoutException>(() =>
+                        ProxyMode.ForwardAsync(http, "http://127.0.0.1:" + port, request, null).GetAwaiter().GetResult());
+                    Assert.That(ex.Message, Does.Contain("HTTP 200 headers (Content-Length 200) arrived but the body did not"));
+                    Assert.That(sw.Elapsed, Is.LessThan(TimeSpan.FromSeconds(14)));
                 }
             }
             finally
@@ -225,10 +268,10 @@ namespace X1.McpBridge.Tests
         }
 
         [TestCase("tools/call", 120)]
-        [TestCase("initialize", 30)]
-        [TestCase("tools/list", 30)]
-        [TestCase("ping", 30)]
-        [TestCase("server/discover", 30)]
+        [TestCase("initialize", 10)]
+        [TestCase("tools/list", 10)]
+        [TestCase("ping", 10)]
+        [TestCase("server/discover", 10)]
         public void RequestTimeout_OnlyToolCallsGetTheLongTimeout(string method, int seconds)
         {
             var request = new JObject { ["jsonrpc"] = "2.0", ["id"] = 1, ["method"] = method };

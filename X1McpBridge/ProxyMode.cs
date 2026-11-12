@@ -129,7 +129,15 @@ namespace X1.McpBridge
                             failure = exCheck.Message;
                         }
 
-                        if (failure == null)
+                        if (failure == null && ex is TimeoutException)
+                        {
+                            // A healthy relay that let a request time out has the request; retrying
+                            // would only make the client wait a second full timeout for the same
+                            // answer (XS-1819 AC4: a clear error within 15s).
+                            failure = "the relay is answering health checks but did not reply to the request (" + Flatten(ex) + ")";
+                            response = null;
+                        }
+                        else if (failure == null)
                         {
                             try
                             {
@@ -541,13 +549,21 @@ namespace X1.McpBridge
 
         // Tool calls can legitimately run long (search, extraction); everything else - initialize,
         // tools/list, ping, discovery probes - is answered in milliseconds, so a client should not
-        // sit for two minutes on one that has stalled (XS-1819 saw ~95-120s hangs).
+        // sit for two minutes on one that has stalled (XS-1819 saw ~95-120s hangs). 10s leaves
+        // room for a health check inside the ticket's 15s budget for a clear error, since a
+        // timed-out request is not retried (see Run).
         internal static TimeSpan RequestTimeout(JObject request)
         {
             var method = request == null ? null : request.Value<string>("method");
             return string.Equals(method, "tools/call", StringComparison.Ordinal)
                 ? TimeSpan.FromSeconds(120)
-                : TimeSpan.FromSeconds(30);
+                : TimeSpan.FromSeconds(10);
+        }
+
+        private static TimeoutException RequestTimedOut(JObject request, string whatArrived, Exception inner)
+        {
+            return new TimeoutException(
+                "no complete reply within " + (int)RequestTimeout(request).TotalSeconds + "s (" + whatArrived + ")", inner);
         }
 
         internal static async Task<ForwardResult> ForwardAsync(
@@ -573,7 +589,17 @@ namespace X1.McpBridge
                     httpRequest.Headers.ConnectionClose = true;
 
                 // Headers first, body second, so a failure can say how far the reply got.
-                using (var resp = await http.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, cts.Token).ConfigureAwait(false))
+                HttpResponseMessage sent;
+                try
+                {
+                    sent = await http.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, cts.Token).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (cts.IsCancellationRequested)
+                {
+                    throw RequestTimedOut(request, "no response headers arrived", ex);
+                }
+
+                using (var resp = sent)
                 {
                     if (resp.Headers.TryGetValues(McpSessionHeaderName, out var sessionValues))
                     {
@@ -585,6 +611,10 @@ namespace X1.McpBridge
                     if (resp.StatusCode == System.Net.HttpStatusCode.Accepted)
                         return new ForwardResult { Response = null, SessionId = sessionId };
 
+                    // Captured up front: the timeout below disposes the response.
+                    var headersSeen = "HTTP " + (int)resp.StatusCode + " headers (Content-Length " +
+                        (resp.Content.Headers.ContentLength.HasValue ? resp.Content.Headers.ContentLength.Value.ToString() : "unset") + ")";
+
                     string body;
                     try
                     {
@@ -593,12 +623,14 @@ namespace X1.McpBridge
                         using (cts.Token.Register(() => resp.Dispose()))
                             body = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
                     }
+                    catch (Exception ex) when (cts.IsCancellationRequested)
+                    {
+                        throw RequestTimedOut(request, headersSeen + " arrived but the body did not", ex);
+                    }
                     catch (Exception ex)
                     {
                         throw new IOException(
-                            "the relay sent HTTP " + (int)resp.StatusCode + " headers (Content-Length " +
-                            (resp.Content.Headers.ContentLength.HasValue ? resp.Content.Headers.ContentLength.Value.ToString() : "unset") +
-                            ") but the connection closed before the body arrived: " + Flatten(ex), ex);
+                            "the relay sent " + headersSeen + " but the connection closed before the body arrived: " + Flatten(ex), ex);
                     }
 
                     if (string.IsNullOrEmpty(body))
