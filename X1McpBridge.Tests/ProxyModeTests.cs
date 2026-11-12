@@ -6,6 +6,16 @@
 // This license does not grant, and shall not be construed as granting, any
 // patent rights. See the PATENTS file in the repository root.
 
+using System;
+using System.IO;
+using System.Net;
+using System.Net.Http;
+using System.Net.Sockets;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
+using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 
 namespace X1.McpBridge.Tests
@@ -62,6 +72,176 @@ namespace X1.McpBridge.Tests
         {
             var result = ProxyMode.ParseSseLastMessage("");
             Assert.That(result, Is.Null);
+        }
+
+        // ── XS-1819: replies cut off mid-body ───────────────────────────────────
+
+        /// <summary>
+        /// A one-shot fake relay on a loopback port: reads one request, writes
+        /// <paramref name="rawResponse"/> verbatim, and closes - which, with a Content-Length larger
+        /// than the bytes sent, is exactly the "connection was closed" the customer logs show.
+        /// </summary>
+        private static string StartFakeRelay(string rawResponse, int requests = 1)
+        {
+            var listener = new TcpListener(IPAddress.Loopback, 0);
+            listener.Start();
+            int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            Task.Run(() =>
+            {
+                try
+                {
+                    for (int i = 0; i < requests; i++)
+                    {
+                        using (var client = listener.AcceptTcpClient())
+                        using (var stream = client.GetStream())
+                        {
+                            ReadRequest(stream);
+                            var bytes = Encoding.ASCII.GetBytes(rawResponse);
+                            stream.Write(bytes, 0, bytes.Length);
+                            stream.Flush();
+                        }
+                    }
+                }
+                catch { /* test over */ }
+                finally { listener.Stop(); }
+            });
+            return "http://127.0.0.1:" + port;
+        }
+
+        // Headers, then Content-Length bytes of body - enough that the client has finished sending.
+        private static void ReadRequest(NetworkStream stream)
+        {
+            var sb = new StringBuilder();
+            var one = new byte[1];
+            while (!sb.ToString().EndsWith("\r\n\r\n", StringComparison.Ordinal) && stream.Read(one, 0, 1) == 1)
+                sb.Append((char)one[0]);
+            var m = Regex.Match(sb.ToString(), @"Content-Length:\s*(\d+)", RegexOptions.IgnoreCase);
+            int remaining = m.Success ? int.Parse(m.Groups[1].Value) : 0;
+            var buf = new byte[4096];
+            while (remaining > 0)
+            {
+                int n = stream.Read(buf, 0, Math.Min(buf.Length, remaining));
+                if (n <= 0) break;
+                remaining -= n;
+            }
+        }
+
+        private const string TruncatedJson =
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 200\r\n\r\n{\"jsonrpc\":\"2.0\"";
+
+        private const string GoodJson =
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 36\r\nConnection: close\r\n\r\n" +
+            "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}";
+
+        private static HttpClient NewClient()
+        {
+            return new HttpClient(new HttpClientHandler { UseProxy = false }) { Timeout = Timeout.InfiniteTimeSpan };
+        }
+
+        [Test]
+        public void CheckHealth_ReplyCutOffMidBody_IsNotHealthy()
+        {
+            using (var http = NewClient())
+            {
+                var snap = ProxyMode.CheckHealthAsync(http, StartFakeRelay(TruncatedJson)).GetAwaiter().GetResult();
+                Assert.That(snap.Reachable, Is.False);
+            }
+        }
+
+        [Test]
+        public void CheckHealth_RealHostRelay_IsHealthyAndIdentified()
+        {
+            var probe = new TcpListener(IPAddress.Loopback, 0);
+            probe.Start();
+            int port = ((IPEndPoint)probe.LocalEndpoint).Port;
+            probe.Stop();
+            var url = "http://localhost:" + port;
+
+            Assert.That(HostMode.StartServingForTest(url, req => McpProtocol.Ok(req["id"], new JObject())), Is.True);
+            try
+            {
+                using (var http = NewClient())
+                {
+                    var snap = ProxyMode.CheckHealthAsync(http, url).GetAwaiter().GetResult();
+                    Assert.That(snap.Reachable, Is.True);
+                    Assert.That(snap.Component, Is.EqualTo(RelayHealth.ComponentHost));
+                    Assert.That(snap.Pid, Is.EqualTo(System.Diagnostics.Process.GetCurrentProcess().Id));
+                }
+            }
+            finally
+            {
+                HostMode.StopServingForTest();
+            }
+        }
+
+        [Test]
+        public void Forward_ReplyCutOffMidBody_FailsSayingHowFarTheReplyGot()
+        {
+            using (var http = NewClient())
+            {
+                var request = JObject.Parse("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\"}");
+                var ex = Assert.Throws<IOException>(() =>
+                    ProxyMode.ForwardAsync(http, StartFakeRelay(TruncatedJson), request, null).GetAwaiter().GetResult());
+                Assert.That(ex.Message, Does.Contain("HTTP 200 headers (Content-Length 200)"));
+                Assert.That(ex.Message, Does.Contain("connection closed before the body arrived"));
+            }
+        }
+
+        [Test]
+        public void Forward_GoodReply_FreshConnection_IsRelayed()
+        {
+            using (var http = NewClient())
+            {
+                var request = JObject.Parse("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\"}");
+                var result = ProxyMode.ForwardAsync(http, StartFakeRelay(GoodJson), request, null, freshConnection: true)
+                    .GetAwaiter().GetResult();
+                Assert.That(result.Response.Value<int>("id"), Is.EqualTo(1));
+            }
+        }
+
+        [Test]
+        public void Forward_StalledReply_TimesOutInsteadOfHanging()
+        {
+            // Accepts, never answers. A non-tool request must give up at its 30s cap, not 120s.
+            var listener = new TcpListener(IPAddress.Loopback, 0);
+            listener.Start();
+            int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            try
+            {
+                using (var http = NewClient())
+                {
+                    var request = JObject.Parse("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}");
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
+                    Assert.Catch<Exception>(() =>
+                        ProxyMode.ForwardAsync(http, "http://127.0.0.1:" + port, request, null).GetAwaiter().GetResult());
+                    Assert.That(sw.Elapsed, Is.LessThan(TimeSpan.FromSeconds(40)));
+                    Assert.That(sw.Elapsed, Is.GreaterThan(TimeSpan.FromSeconds(25)));
+                }
+            }
+            finally
+            {
+                listener.Stop();
+            }
+        }
+
+        [TestCase("tools/call", 120)]
+        [TestCase("initialize", 30)]
+        [TestCase("tools/list", 30)]
+        [TestCase("ping", 30)]
+        [TestCase("server/discover", 30)]
+        public void RequestTimeout_OnlyToolCallsGetTheLongTimeout(string method, int seconds)
+        {
+            var request = new JObject { ["jsonrpc"] = "2.0", ["id"] = 1, ["method"] = method };
+            Assert.That(ProxyMode.RequestTimeout(request), Is.EqualTo(TimeSpan.FromSeconds(seconds)));
+        }
+
+        [Test]
+        public void Flatten_IncludesInnerExceptions()
+        {
+            var ex = new HttpRequestException("Error while copying content to a stream.",
+                new IOException("Unable to read data from the transport connection: The connection was closed."));
+            Assert.That(ProxyMode.Flatten(ex), Is.EqualTo(
+                "Error while copying content to a stream. -> Unable to read data from the transport connection: The connection was closed."));
         }
 
         [Test]
