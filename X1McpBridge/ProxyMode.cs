@@ -51,9 +51,17 @@ namespace X1.McpBridge
             Log.Info("X1 MCP Bridge starting (proxy mode -> " + daemonUrl + ", expecting a " +
                      BridgeConfig.GetRelayMode() + " relay)");
 
-            using (var http = new HttpClient { Timeout = TimeSpan.FromSeconds(120) })
+            // UseProxy=false: the relay is always loopback, so a machine-wide WinINET/PAC proxy has no
+            // business seeing these requests. Timeout is per request instead (see RequestTimeout).
+            using (var http = new HttpClient(new HttpClientHandler { UseProxy = false }) { Timeout = Timeout.InfiniteTimeSpan })
             {
-                EnsureRelayRunningAsync(http, daemonUrl).GetAwaiter().GetResult();
+                // Non-null while the last attempt to get a usable relay failed. While it is set, each
+                // request re-checks the relay first and, if it is still unusable, answers with the
+                // error at once instead of forwarding into a request timeout (XS-1819 AC4).
+                string relayFailure = EnsureRelayRunningAsync(http, daemonUrl).GetAwaiter().GetResult();
+                var relayCheckedAt = DateTime.UtcNow;
+                if (relayFailure != null)
+                    Log.Error("No usable relay at startup: " + relayFailure + ". Will retry on the first request.");
 
                 string sessionId = null;
                 string line;
@@ -75,6 +83,27 @@ namespace X1.McpBridge
 
                     bool isNotification = McpProtocol.IsNotification(request);
                     JObject response;
+
+                    if (relayFailure != null)
+                    {
+                        // A check that just failed is the answer; re-checking it again at once would
+                        // only push the client's error past the point it is useful.
+                        if (DateTime.UtcNow - relayCheckedAt >= RelayRecheckInterval)
+                        {
+                            try { relayFailure = EnsureRelayRunningAsync(http, daemonUrl, afterFailure: true).GetAwaiter().GetResult(); }
+                            catch (Exception exCheck) { relayFailure = exCheck.Message; }
+                            relayCheckedAt = DateTime.UtcNow;
+                        }
+
+                        if (relayFailure != null)
+                        {
+                            Log.Error("Not forwarding " + DescribeRequest(request) + ": " + relayFailure + ".");
+                            if (!isNotification)
+                                WriteResponse(mcpOut, RelayUnavailableError(request, daemonUrl, relayFailure, null));
+                            continue;
+                        }
+                    }
+
                     try
                     {
                         var result = ForwardAsync(http, daemonUrl, request, sessionId).GetAwaiter().GetResult();
@@ -83,35 +112,82 @@ namespace X1.McpBridge
                     }
                     catch (Exception ex)
                     {
-                        Log.Warn("Forwarding to the relay failed (" + ex.Message + "); relaunching and retrying once.");
+                        // XS-1819: this used to force-launch a second relay and retry. That can never
+                        // help - if a relay holds the single-instance lock the new one exits at once,
+                        // and the retry lands on the same broken relay. Instead, find out what is
+                        // actually wrong: a healthy relay gets a retry on a fresh connection, a stale
+                        // one gets replaced, and anything else becomes a clear error.
+                        Log.Warn("Forwarding " + DescribeRequest(request) + " to the relay failed (" + Flatten(ex) +
+                                 "); checking the relay before retrying once.");
+                        string failure;
                         try
                         {
-                            EnsureRelayRunningAsync(http, daemonUrl, forceRelaunch: true).GetAwaiter().GetResult();
-                            var result = ForwardAsync(http, daemonUrl, request, sessionId).GetAwaiter().GetResult();
-                            response = result.Response;
-                            sessionId = result.SessionId;
+                            failure = EnsureRelayRunningAsync(http, daemonUrl, afterFailure: true).GetAwaiter().GetResult();
                         }
-                        catch (Exception ex2)
+                        catch (Exception exCheck)
                         {
-                            Log.Error("Forwarding to the relay failed after relaunch", ex2);
-                            response = isNotification
-                                ? null
-                                : McpProtocol.Err(request["id"], -32603,
-                                    "The shared X1 MCP relay (" + BridgeConfig.GetRelayLaunchTarget().FileName +
-                                    ") is unavailable.", ex2.Message);
+                            failure = exCheck.Message;
+                        }
+
+                        if (failure == null && ex is TimeoutException)
+                        {
+                            // A healthy relay that let a request time out has the request; retrying
+                            // would only make the client wait a second full timeout for the same
+                            // answer (XS-1819 AC4: a clear error within 15s).
+                            failure = "the relay is answering health checks but did not reply to the request (" + Flatten(ex) + ")";
+                            response = null;
+                        }
+                        else if (failure == null)
+                        {
+                            try
+                            {
+                                var result = ForwardAsync(http, daemonUrl, request, sessionId, freshConnection: true).GetAwaiter().GetResult();
+                                response = result.Response;
+                                sessionId = result.SessionId;
+                            }
+                            catch (Exception ex2)
+                            {
+                                Log.Error("Forwarding " + DescribeRequest(request) + " to the relay failed again on a fresh connection", ex2);
+                                failure = "the relay is answering health checks but the request failed twice (" + Flatten(ex2) + ")";
+                                response = null;
+                            }
+                        }
+                        else
+                        {
+                            // No usable relay at all: later requests answer at once until one is.
+                            relayFailure = failure;
+                            relayCheckedAt = DateTime.UtcNow;
+                            response = null;
+                        }
+
+                        if (failure != null)
+                        {
+                            Log.Error("Giving up on " + DescribeRequest(request) + ": " + failure + ".");
+                            response = isNotification ? null : RelayUnavailableError(request, daemonUrl, failure, ex);
                         }
                     }
 
                     if (response != null)
-                    {
-                        mcpOut.Write(response.ToString(Newtonsoft.Json.Formatting.None) + "\n");
-                        mcpOut.Flush();
-                    }
+                        WriteResponse(mcpOut, response);
                 }
             }
 
             Log.Info("X1 MCP Bridge (proxy mode) shutting down (stdin closed)");
             return 0;
+        }
+
+        private static void WriteResponse(TextWriter mcpOut, JObject response)
+        {
+            mcpOut.Write(response.ToString(Newtonsoft.Json.Formatting.None) + "\n");
+            mcpOut.Flush();
+        }
+
+        private static JObject RelayUnavailableError(JObject request, string daemonUrl, string failure, Exception cause)
+        {
+            return McpProtocol.Err(request["id"], -32603,
+                "The shared X1 MCP relay on " + daemonUrl + " is not responding: " + failure +
+                ". Details are in %LOCALAPPDATA%\\X1 Discovery\\McpBridge\\logs\\X1McpBridge.log.",
+                cause == null ? null : Flatten(cause));
         }
 
         // ── Relay lifecycle ──────────────────────────────────────────────────────
@@ -141,20 +217,43 @@ namespace X1.McpBridge
             }
         });
 
-        private static async Task EnsureRelayRunningAsync(HttpClient http, string daemonUrl, bool forceRelaunch = false)
+        // A Lean host binds its port in well under a second (the customer logs in XS-1819 show
+        // ~150ms), so waiting the full daemonStartupTimeoutMs - sized for the Full daemon's
+        // self-extract - would only delay the clear error the user should get instead.
+        private const int HostStartupWaitCapMs = 5000;
+
+        // A --host process younger than this is assumed to be another proxy's fresh launch that just
+        // hasn't bound the port yet, never a stale relay - see RelayLauncher.SelectStaleHosts.
+        private static readonly TimeSpan StaleHostMinAge = TimeSpan.FromSeconds(10);
+
+        // While no relay is usable, how stale the last failed check may be before a request triggers
+        // a fresh one rather than being answered with that failure straight away.
+        private static readonly TimeSpan RelayRecheckInterval = TimeSpan.FromSeconds(10);
+
+        /// <summary>
+        /// Makes sure a usable relay is answering. Returns null on success, or a one-line reason
+        /// fit for the user's error message on failure.
+        ///
+        /// <paramref name="afterFailure"/> means a forward just failed. A relay that still passes the
+        /// health check is then kept (the caller retries on a fresh connection); one that doesn't is
+        /// treated as stale rather than merely "not started yet".
+        /// </summary>
+        private static async Task<string> EnsureRelayRunningAsync(HttpClient http, string daemonUrl, bool afterFailure = false)
         {
             var target = BridgeConfig.GetRelayLaunchTarget();
 
-            if (!forceRelaunch)
+            var snap = await CheckHealthAsync(http, daemonUrl).ConfigureAwait(false);
             {
-                var snap = await CheckHealthAsync(http, daemonUrl).ConfigureAwait(false);
                 var decision = RelayHealth.Decide(snap, target.Mode, OurRelayVersion.Value, Environment.UserName);
 
                 switch (decision.Action)
                 {
                     case RelayHealth.Action.Use:
-                        Log.Debug("Using the relay already on " + daemonUrl + ": " + decision.Reason + ".");
-                        return;
+                        if (afterFailure)
+                            Log.Info("The relay still passes its health check (" + DescribeSnapshot(snap) + ").");
+                        else
+                            Log.Debug("Using the relay already on " + daemonUrl + ": " + decision.Reason + ".");
+                        return null;
 
                     case RelayHealth.Action.RefuseWrongUser:
                         // Deliberately fatal-ish: returning here means every forwarded call in this
@@ -177,29 +276,116 @@ namespace X1.McpBridge
                 }
             }
 
-            LaunchRelayDetached(target);
+            if (await LaunchAndWaitAsync(http, daemonUrl, target).ConfigureAwait(false))
+                return null;
 
-            int startupTimeoutMs = BridgeConfig.GetDaemonStartupTimeoutMs();
-            var deadline = DateTime.UtcNow.AddMilliseconds(startupTimeoutMs);
+            // Nothing healthy came up. In the Lean flavor the usual reason is a --host that still
+            // holds the single-instance mutex but isn't answering (hung, suspended, wedged): every
+            // relay we launch sees the mutex and exits, forever. Replace it.
+            if (target.Mode == RelayMode.Host)
+            {
+                var stale = RelayLauncher.SelectStaleHosts(
+                    RelayLauncher.FindHostProcesses(),
+                    Process.GetCurrentProcess().SessionId,
+                    Process.GetCurrentProcess().Id,
+                    DateTime.UtcNow,
+                    StaleHostMinAge);
+
+                if (stale.Count > 0)
+                {
+                    foreach (var h in stale)
+                    {
+                        Log.Warn("Relay pid " + h.Pid + " (started " +
+                                 (h.StartedUtc == DateTime.MinValue ? "at an unknown time" : h.StartedUtc.ToString("o")) +
+                                 ") holds the single-instance lock but is not answering /health on " + daemonUrl +
+                                 "; stopping it.");
+                        KillProcessById(h.Pid);
+                    }
+
+                    if (await LaunchAndWaitAsync(http, daemonUrl, target).ConfigureAwait(false))
+                        return null;
+
+                    return "a stale relay (pid " + string.Join(", ", stale.ConvertAll(h => h.Pid.ToString()).ToArray()) +
+                           ") was replaced, but the new relay did not answer either";
+                }
+            }
+
+            return DescribeUnreachable(daemonUrl, target);
+        }
+
+        /// <summary>
+        /// Launches the relay and waits for it to pass a health check. "Relay is up" is logged only
+        /// here, and only after /health has actually answered with a body (XS-1819).
+        /// </summary>
+        private static async Task<bool> LaunchAndWaitAsync(HttpClient http, string daemonUrl, RelayLaunchTarget target)
+        {
+            int launchedPid = LaunchRelayDetached(target);
+
+            int waitMs = BridgeConfig.GetDaemonStartupTimeoutMs();
+            if (target.Mode == RelayMode.Host)
+                waitMs = Math.Min(waitMs, HostStartupWaitCapMs);
+
+            var deadline = DateTime.UtcNow.AddMilliseconds(waitMs);
             while (DateTime.UtcNow < deadline)
             {
-                if (await IsHealthyAsync(http, daemonUrl).ConfigureAwait(false))
+                var snap = await CheckHealthAsync(http, daemonUrl).ConfigureAwait(false);
+                if (snap.Reachable)
                 {
-                    Log.Info("Relay is up (" + target.ExpectedComponent + ").");
-                    return;
+                    Log.Info("Relay is up (" + DescribeSnapshot(snap) +
+                             (launchedPid > 0 && snap.Pid > 0 && snap.Pid != launchedPid
+                                 ? "; answered by an existing relay, not the one just launched (pid " + launchedPid + ")"
+                                 : "") + ").");
+                    return true;
                 }
                 await Task.Delay(300).ConfigureAwait(false);
             }
 
-            Log.Warn("Relay did not become healthy within " + startupTimeoutMs + "ms; proceeding anyway " +
-                      "(the first forwarded request will surface a clear connection error if it's still not up).");
+            Log.Warn("No relay answered /health on " + daemonUrl + " within " + waitMs + "ms of launching " +
+                     (launchedPid > 0 ? "pid " + launchedPid : "the relay") + ".");
+            return false;
         }
 
-        // Identity-aware health check, used only for the initial "is there already a usable relay"
-        // decision. The post-launch polling loop above uses the plain IsHealthyAsync: once this shim
-        // has launched its own relay, of course it matches - re-checking identity there would just
-        // be wasted round trips.
-        private static async Task<RelayHealth.Snapshot> CheckHealthAsync(HttpClient http, string daemonUrl)
+        private static string DescribeUnreachable(string daemonUrl, RelayLaunchTarget target)
+        {
+            int port = 0;
+            try { port = new Uri(daemonUrl).Port; } catch { }
+
+            bool portHasListener = false;
+            try
+            {
+                foreach (var ep in System.Net.NetworkInformation.IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners())
+                {
+                    if (ep.Port == port)
+                    {
+                        portHasListener = true;
+                        break;
+                    }
+                }
+            }
+            catch { /* diagnostic only */ }
+
+            if (portHasListener)
+                return "something is listening on port " + port + " but it is not answering as an X1 relay " +
+                       "(another program may be using the port; 'netstat -ano | findstr :" + port + "' shows its pid)";
+
+            return "the relay (" + target.FileName + (string.IsNullOrEmpty(target.Arguments) ? "" : " " + target.Arguments) +
+                   ") was launched but never started listening on port " + port;
+        }
+
+        private static string DescribeSnapshot(RelayHealth.Snapshot snap)
+        {
+            return (snap.Component ?? "unidentified relay") +
+                   (snap.Pid > 0 ? " pid " + snap.Pid : "") +
+                   (snap.Version != null ? " v" + snap.Version : "") +
+                   (snap.ExePath != null ? " at " + snap.ExePath : "");
+        }
+
+        /// <summary>
+        /// Health check. A relay counts as reachable only if /health returns success AND its whole
+        /// body can be read - the read is what fails when replies are being cut off. GetAsync
+        /// buffers the body by default, so a truncated reply surfaces here as an exception.
+        /// </summary>
+        internal static async Task<RelayHealth.Snapshot> CheckHealthAsync(HttpClient http, string daemonUrl)
         {
             try
             {
@@ -236,16 +422,7 @@ namespace X1.McpBridge
 
         private static async Task<bool> IsHealthyAsync(HttpClient http, string daemonUrl)
         {
-            try
-            {
-                using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2)))
-                using (var resp = await http.GetAsync(daemonUrl + "/health", cts.Token).ConfigureAwait(false))
-                    return resp.IsSuccessStatusCode;
-            }
-            catch
-            {
-                return false;
-            }
+            return (await CheckHealthAsync(http, daemonUrl).ConfigureAwait(false)).Reachable;
         }
 
         // Stops the relay that currently owns the port.
@@ -343,57 +520,86 @@ namespace X1.McpBridge
         // In Lean mode the target is this very exe re-launched as --host, which is why the launch
         // has to stay detached rather than becoming an in-process thread: Cowork tears down
         // per-task sandboxes, and a relay owned by one session's process tree dies with it.
-        private static void LaunchRelayDetached(RelayLaunchTarget target)
+        //
+        // XS-1819: "detached" now means it - no inherited handles and out of the caller's job. See
+        // RelayLauncher for why Process.Start could not do that. Returns the new pid, or 0.
+        private static int LaunchRelayDetached(RelayLaunchTarget target)
         {
             if (!File.Exists(target.FileName))
             {
                 Log.Error("Relay executable not found at '" + target.FileName + "'; cannot launch it. " +
                           "Configure daemonExePath in x1mcp.config.json if it lives elsewhere.");
-                return;
+                return 0;
             }
 
-            try
-            {
-                Log.Info("Launching shared relay: " + target.FileName +
-                         (string.IsNullOrEmpty(target.Arguments) ? "" : " " + target.Arguments));
-                var psi = new ProcessStartInfo
-                {
-                    FileName = target.FileName,
-                    Arguments = target.Arguments ?? "",
-                    WorkingDirectory = Path.GetDirectoryName(target.FileName),
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    RedirectStandardInput = false,
-                    RedirectStandardOutput = false,
-                    RedirectStandardError = false,
-                };
-                Process.Start(psi);
-            }
-            catch (Exception ex)
-            {
-                Log.Error("Failed to launch the relay at '" + target.FileName + "'", ex);
-            }
+            Log.Info("Launching shared relay: " + target.FileName +
+                     (string.IsNullOrEmpty(target.Arguments) ? "" : " " + target.Arguments) +
+                     " (this proxy is pid " + Process.GetCurrentProcess().Id +
+                     (RelayLauncher.IsCurrentProcessInJob() ? ", running inside a job object" : "") + ").");
+            return RelayLauncher.LaunchDetached(target.FileName, target.Arguments, Path.GetDirectoryName(target.FileName));
         }
 
         // ── JSON-RPC <-> Streamable HTTP relay ──────────────────────────────────
 
-        private struct ForwardResult
+        internal struct ForwardResult
         {
             public JObject Response;
             public string SessionId;
         }
 
-        private static async Task<ForwardResult> ForwardAsync(HttpClient http, string daemonUrl, JObject request, string sessionId)
+        // Tool calls can legitimately run long (search, extraction); everything else - initialize,
+        // tools/list, ping, discovery probes - is answered in milliseconds, so a client should not
+        // sit for two minutes on one that has stalled (XS-1819 saw ~95-120s hangs). 10s leaves
+        // room for a health check inside the ticket's 15s budget for a clear error, since a
+        // timed-out request is not retried (see Run).
+        internal static TimeSpan RequestTimeout(JObject request)
+        {
+            var method = request == null ? null : request.Value<string>("method");
+            return string.Equals(method, "tools/call", StringComparison.Ordinal)
+                ? TimeSpan.FromSeconds(120)
+                : TimeSpan.FromSeconds(10);
+        }
+
+        private static TimeoutException RequestTimedOut(JObject request, string whatArrived, Exception inner)
+        {
+            return new TimeoutException(
+                "no complete reply within " + (int)RequestTimeout(request).TotalSeconds + "s (" + whatArrived + ")", inner);
+        }
+
+        internal static async Task<ForwardResult> ForwardAsync(
+            HttpClient http, string daemonUrl, JObject request, string sessionId, bool freshConnection = false)
         {
             var content = new StringContent(request.ToString(Newtonsoft.Json.Formatting.None), Encoding.UTF8, "application/json");
             using (var httpRequest = new HttpRequestMessage(HttpMethod.Post, daemonUrl + "/graphql/mcp") { Content = content })
+            using (var cts = new CancellationTokenSource(RequestTimeout(request)))
             {
                 httpRequest.Headers.Accept.ParseAdd("application/json");
                 httpRequest.Headers.Accept.ParseAdd("text/event-stream");
                 if (sessionId != null)
                     httpRequest.Headers.TryAddWithoutValidation(McpSessionHeaderName, sessionId);
 
-                using (var resp = await http.SendAsync(httpRequest).ConfigureAwait(false))
+                // No "Expect: 100-continue" round trip (on by default for .NET Framework POSTs): the
+                // body is a few hundred bytes to a loopback relay, and the extra interim response is
+                // one more thing for a local proxy or security filter to mishandle.
+                httpRequest.Headers.ExpectContinue = false;
+
+                // The retry after a failure uses a brand-new connection, so a pooled keep-alive
+                // connection that went bad can't fail the same request twice.
+                if (freshConnection)
+                    httpRequest.Headers.ConnectionClose = true;
+
+                // Headers first, body second, so a failure can say how far the reply got.
+                HttpResponseMessage sent;
+                try
+                {
+                    sent = await http.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, cts.Token).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (cts.IsCancellationRequested)
+                {
+                    throw RequestTimedOut(request, "no response headers arrived", ex);
+                }
+
+                using (var resp = sent)
                 {
                     if (resp.Headers.TryGetValues(McpSessionHeaderName, out var sessionValues))
                     {
@@ -405,7 +611,28 @@ namespace X1.McpBridge
                     if (resp.StatusCode == System.Net.HttpStatusCode.Accepted)
                         return new ForwardResult { Response = null, SessionId = sessionId };
 
-                    var body = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
+                    // Captured up front: the timeout below disposes the response.
+                    var headersSeen = "HTTP " + (int)resp.StatusCode + " headers (Content-Length " +
+                        (resp.Content.Headers.ContentLength.HasValue ? resp.Content.Headers.ContentLength.Value.ToString() : "unset") + ")";
+
+                    string body;
+                    try
+                    {
+                        // ReadAsStringAsync takes no token on .NET Framework; disposing the response
+                        // is what aborts a body that stalls past the request timeout.
+                        using (cts.Token.Register(() => resp.Dispose()))
+                            body = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
+                    }
+                    catch (Exception ex) when (cts.IsCancellationRequested)
+                    {
+                        throw RequestTimedOut(request, headersSeen + " arrived but the body did not", ex);
+                    }
+                    catch (Exception ex)
+                    {
+                        throw new IOException(
+                            "the relay sent " + headersSeen + " but the connection closed before the body arrived: " + Flatten(ex), ex);
+                    }
+
                     if (string.IsNullOrEmpty(body))
                         return new ForwardResult { Response = null, SessionId = sessionId };
 
@@ -416,6 +643,27 @@ namespace X1.McpBridge
                     return new ForwardResult { Response = parsed, SessionId = sessionId };
                 }
             }
+        }
+
+        private static string DescribeRequest(JObject request)
+        {
+            var method = request.Value<string>("method") ?? "(no method)";
+            var id = request["id"];
+            return method + (id == null ? "" : " id=" + id.ToString(Newtonsoft.Json.Formatting.None));
+        }
+
+        // HttpClient's own messages ("Error while copying content to a stream.") hide the useful
+        // part in InnerException; the whole chain on one line is what a support log needs.
+        internal static string Flatten(Exception ex)
+        {
+            var sb = new StringBuilder();
+            for (var e = ex; e != null; e = e.InnerException)
+            {
+                if (sb.Length > 0)
+                    sb.Append(" -> ");
+                sb.Append(e is TaskCanceledException ? "timed out" : e.Message);
+            }
+            return sb.ToString();
         }
 
         // Streamable HTTP responses can arrive as SSE ("event: message\ndata: {...}\n\n",

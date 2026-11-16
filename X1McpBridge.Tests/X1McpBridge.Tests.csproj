@@ -84,6 +84,7 @@
     <Compile Include="MemoryMappedFileReaderTests.cs" />
     <Compile Include="McpServerProtocolTests.cs" />
     <Compile Include="ProxyModeTests.cs" />
+    <Compile Include="RelayLauncherTests.cs" />
     <Compile Include="RelayHealthTests.cs" />
     <Compile Include="SearchManagerCallbacksTests.cs" />
     <Compile Include="ServiceAvailabilityTests.cs" />

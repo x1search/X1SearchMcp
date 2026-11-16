@@ -46,6 +46,7 @@
     <Reference Include="System.Core" />
     <Reference Include="System.IO.Compression" />
     <Reference Include="System.IO.Compression.FileSystem" />
+    <Reference Include="System.Management" />
     <Reference Include="System.Net.Http" />
     <Reference Include="System.Runtime.Serialization" />
     <Reference Include="System.ServiceModel" />
@@ -74,6 +75,7 @@
     <Compile Include="ProxyMode.cs" />
     <Compile Include="RegistrySettings.cs" />
     <Compile Include="RelayHealth.cs" />
+    <Compile Include="RelayLauncher.cs" />
     <Compile Include="RelayProcessScanner.cs" />
     <Compile Include="SearchBridge.cs" />
     <Compile Include="SearchManagerCallbacks.cs" />
